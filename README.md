@@ -12,7 +12,21 @@ It only changes what **you** see. They are not blocked and are not notified.
 
 > Client mods are against Discord's Terms of Service. Use at your own risk.
 
-## Install
+## Easy way: DiscordNameHider.exe
+
+Double-click `DiscordNameHider.exe`, type the people to hide (one per line), click **Hide them**.
+Discord closes and reopens with them hidden. Run it again to change the list, or click
+**Remove tool** to put Discord back to normal. Nothing else to install.
+
+Build the exe (developer PC only, needs Node + Git):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build-exe.ps1
+```
+
+Output: `out\DiscordNameHider.exe`.
+
+## Manual install (developers)
 
 Needs Node.js and Git.
 

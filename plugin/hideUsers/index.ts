@@ -162,6 +162,7 @@ export default definePlugin({
     name: "HideUsers",
     description: "Completely hide chosen people from your friends list, DMs, messages and member lists (only on your screen).",
     authors: [{ name: "you", id: 0n }],
+    enabledByDefault: true,
     settings,
 
     start() {
