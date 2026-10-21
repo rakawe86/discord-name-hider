@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#404EED"/>
+      <stop offset="1" stop-color="#1E1F22"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" rx="24" fill="url(#bg)"/>
+
+  <!-- eye-off icon -->
+  <g transform="translate(110 150)" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M-62 0 C-40 -38 -18 -48 0 -48 C18 -48 40 -38 62 0 C40 38 18 48 0 48 C-18 48 -40 38 -62 0 Z"/>
+    <circle r="17"/>
+    <line x1="-58" y1="-58" x2="58" y2="58" stroke="#23A55A" stroke-width="12"/>
+  </g>
+
+  <text x="215" y="138" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="64" font-weight="700" fill="#fff">Discord Name Hider</text>
+  <text x="218" y="190" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="28" fill="#DBDEE1">Hide anyone from your Discord. One switch. Instant.</text>
+
+  <!-- fake chat rows: one hidden -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18">
+    <rect x="860" y="215" width="300" height="30" rx="8" fill="#ffffff" fill-opacity="0.08"/>
+    <circle cx="880" cy="230" r="9" fill="#5865F2"/>
+    <text x="898" y="236" fill="#fff">alex: see you later</text>
+    <rect x="860" y="252" width="300" height="30" rx="8" fill="#ffffff" fill-opacity="0.05"/>
+    <rect x="872" y="263" width="200" height="8" rx="4" fill="url(#fade)" opacity="0.25"/>
+    <text x="1085" y="273" fill="#23A55A" font-size="14">hidden</text>
+  </g>
+</svg>

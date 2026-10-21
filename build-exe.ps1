@@ -29,4 +29,5 @@ $res = "patcher.js","preload.js","renderer.js","renderer.css" | ForEach-Object {
     /r:System.Web.Extensions.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll `
     @res (Join-Path $PSScriptRoot "tool\NameHider.cs")
 if ($LASTEXITCODE -ne 0) { throw "csc failed" }
+Copy-Item "$out\DiscordNameHider.exe" (Join-Path $PSScriptRoot "DiscordNameHider.exe") -Force
 Write-Host "Built $out\DiscordNameHider.exe" -ForegroundColor Green

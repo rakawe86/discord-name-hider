@@ -305,7 +305,7 @@ class MainForm : Form
     public MainForm()
     {
         Text = "Discord Name Hider";
-        ClientSize = new Size(520, 600);
+        ClientSize = new Size(520, 616);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -336,8 +336,18 @@ class MainForm : Form
             FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, BorderStyle = BorderStyle.None,
             BackColor = Theme.Card, ForeColor = Theme.Text, Font = new Font("Segoe UI", 10f), MultiSelect = true
         };
-        list.Columns.Add("Username or User ID", 250);
-        list.Columns.Add("Note", 205);
+        list.Columns.Add("Username or User ID", 260);
+        list.Columns.Add("Note", 216);
+        // Dark column header; rows keep the default drawing (incl. checkboxes).
+        list.OwnerDraw = true;
+        list.DrawColumnHeader += (s, e) =>
+        {
+            using (var bg = new SolidBrush(Theme.Input)) e.Graphics.FillRectangle(bg, e.Bounds);
+            TextRenderer.DrawText(e.Graphics, e.Header.Text, new Font("Segoe UI Semibold", 9f), new Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 6, e.Bounds.Height),
+                Theme.Muted, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+        };
+        list.DrawItem += (s, e) => { e.DrawDefault = true; };
+        list.DrawSubItem += (s, e) => { e.DrawDefault = true; };
         list.ItemChecked += (s, e) =>
         {
             if (loading) return;
@@ -368,13 +378,13 @@ class MainForm : Form
         Controls.Add(new Label
         {
             Text = "Tip: get a User ID in Discord > Settings > Advanced > Developer Mode, then right-click a person > Copy User ID.\nIn Discord, press Ctrl+Shift+H to switch hiding on/off.",
-            ForeColor = Theme.Muted, Font = new Font("Segoe UI", 8.5f), Location = new Point(20, 508), Size = new Size(480, 36)
+            ForeColor = Theme.Muted, Font = new Font("Segoe UI", 8.5f), Location = new Point(20, 508), Size = new Size(480, 52)
         });
 
         // Footer
-        installBtn = MakeButton("", Theme.Blurple, new Point(20, 552), new Size(200, 32));
+        installBtn = MakeButton("", Theme.Blurple, new Point(20, 568), new Size(200, 32));
         installBtn.Click += (s, e) => InstallOrUninstall();
-        footer = new Label { ForeColor = Theme.Muted, Location = new Point(230, 552), Size = new Size(270, 32), TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 8.75f) };
+        footer = new Label { ForeColor = Theme.Muted, Location = new Point(230, 568), Size = new Size(270, 32), TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 8.75f) };
         Controls.AddRange(new Control[] { installBtn, footer });
 
         state = Hider.LoadState();
