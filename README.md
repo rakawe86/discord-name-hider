@@ -1,48 +1,63 @@
-# discord-name-hider
+<div align="center">
 
-A Vencord plugin (**HideUsers**) that hides chosen people from your own Discord client:
+# Discord Name Hider
 
-- Friends list
-- DM list (1-on-1 DMs with them disappear)
-- Their messages in every channel, DM and group (incl. search, pins, mentions)
-- Typing indicators, voice speaking, notifications
-- Member lists / reactions (best effort, by avatar)
+**Hide anyone from your Discord: friends list, DMs, messages, everywhere. One click to hide, one click to show.**
 
-It only changes what **you** see. They are not blocked and are not notified.
+[![Download](https://img.shields.io/github/v/release/rakawe86/discord-name-hider?label=Download&style=for-the-badge&color=5865F2)](https://github.com/rakawe86/discord-name-hider/releases/latest)
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6?style=for-the-badge&logo=windows)
+![License](https://img.shields.io/github/license/rakawe86/discord-name-hider?style=for-the-badge)
 
-> Client mods are against Discord's Terms of Service. Use at your own risk.
+</div>
 
-## Easy way: DiscordNameHider.exe
+---
 
-Double-click `DiscordNameHider.exe`, type the people to hide (one per line), click **Hide them**.
-Discord closes and reopens with them hidden. Run it again to change the list, or click
-**Remove tool** to put Discord back to normal. Nothing else to install.
+## Features
 
-Build the exe (developer PC only, needs Node + Git):
+- **Hide people completely** from your friends list, DM list, chat messages, member lists, typing indicators and notifications
+- **Instant on/off**: tick or untick a person and Discord updates immediately, no restart
+- **Main switch** to show everyone for a moment, then hide them again with one click
+- **Shortcut in Discord**: press `Ctrl + Shift + H` to toggle hiding
+- **Private**: only changes what *you* see. Hidden people are not blocked and not notified
+- **Single .exe**: nothing else to install
+
+## Download & use
+
+1. Download **[DiscordNameHider.exe](https://github.com/rakawe86/discord-name-hider/releases/latest)**
+2. Double-click it and press **Install into Discord** (one-time; Discord restarts once)
+3. Add people by username or User ID. Ticked = hidden
+
+> **Tip:** User IDs are the most reliable (names can change).
+> In Discord: *Settings → Advanced → Developer Mode*, then right-click a person → **Copy User ID**.
+
+> **Windows warning?** The app is not code-signed, so SmartScreen may show
+> "Windows protected your PC". Click **More info → Run anyway**.
+
+## Uninstall
+
+Open the app and click **Uninstall from Discord**. Discord goes back to normal; your list is kept.
+
+## How it works
+
+The app installs a bundled build of [Vencord](https://github.com/Vendicated/Vencord) with a small
+plugin (`plugin/hideUsers`). Your list is saved in `%APPDATA%\DiscordNameHider\state.json`, and the
+plugin re-reads it every second, so changes apply live. It also keeps working after Discord updates.
+
+## Build from source
+
+Requires Node.js 18+ and Git.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build-exe.ps1
 ```
 
-Output: `out\DiscordNameHider.exe`.
+Output: `out\DiscordNameHider.exe`
 
-## Manual install (developers)
+## Disclaimer
 
-Needs Node.js and Git.
+Client modifications are against Discord's Terms of Service. Use at your own risk.
+This project is not affiliated with Discord or Vencord.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
+## License
 
-Then in Discord: **Settings → Vencord → Plugins → HideUsers** → enable → enter names.
-
-## Hiding someone
-
-Enter user IDs or usernames separated by commas. **User IDs are best** (names can change):
-Settings → Advanced → Developer Mode ON, then right-click the person → **Copy User ID**.
-
-After changing the list, press **Ctrl+R** to reload Discord so everything is re-filtered.
-
-## Update after editing the plugin
-
-Run `install.ps1` again.
+[GPL-3.0](LICENSE). Includes [Vencord](https://github.com/Vendicated/Vencord) (GPL-3.0).

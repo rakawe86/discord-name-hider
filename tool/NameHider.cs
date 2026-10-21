@@ -1,6 +1,7 @@
 // Discord Name Hider - one-file Windows tool.
-// Installs a bundled Vencord build (with the HideUsers plugin) into Discord
-// and lets you set which people to hide. No Node/Git needed on the target PC.
+// Installs a bundled Vencord build (with the HideUsers plugin) into Discord once,
+// then manages who is hidden. Changes apply live: Discord re-reads
+// %APPDATA%\DiscordNameHider\state.json every second, no restart needed.
 
 using System;
 using System.Collections.Generic;
@@ -14,6 +15,10 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
+[assembly: AssemblyTitle("Discord Name Hider")]
+[assembly: AssemblyProduct("Discord Name Hider")]
+[assembly: AssemblyVersion("1.1.0.0")]
+
 static class Program
 {
     [STAThread]
@@ -25,15 +30,53 @@ static class Program
     }
 }
 
+class Person
+{
+    public string value;
+    public string label;
+    public bool hidden;
+}
+
+class HiderState
+{
+    public bool enabled = true;
+    public List<Person> users = new List<Person>();
+}
+
 static class Hider
 {
     static readonly string LocalApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     static readonly string RoamingApp = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
     public static readonly string DistDir = Path.Combine(LocalApp, "DiscordNameHider", "dist");
-    static readonly string SettingsFile = Path.Combine(RoamingApp, "Vencord", "settings", "settings.json");
+    public static readonly string StateFile = Path.Combine(RoamingApp, "DiscordNameHider", "state.json");
+    static readonly string VencordSettings = Path.Combine(RoamingApp, "Vencord", "settings", "settings.json");
     static readonly string[] Flavors = { "Discord", "DiscordPTB", "DiscordCanary" };
     static readonly string[] DistFiles = { "patcher.js", "preload.js", "renderer.js", "renderer.css" };
+
+    /* ---------- state file ---------- */
+
+    public static HiderState LoadState()
+    {
+        try
+        {
+            if (File.Exists(StateFile))
+                return new JavaScriptSerializer().Deserialize<HiderState>(File.ReadAllText(StateFile)) ?? new HiderState();
+        }
+        catch { }
+        return new HiderState();
+    }
+
+    public static void SaveState(HiderState s)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(StateFile));
+        var tmp = StateFile + ".tmp";
+        File.WriteAllText(tmp, new JavaScriptSerializer().Serialize(s));
+        if (File.Exists(StateFile)) File.Replace(tmp, StateFile, null);
+        else File.Move(tmp, StateFile);
+    }
+
+    /* ---------- Discord install ---------- */
 
     public static List<string> InstalledDiscords()
     {
@@ -51,7 +94,21 @@ static class Hider
         }
     }
 
-    public static bool CloseDiscord()
+    public static bool IsInstalled()
+    {
+        if (!File.Exists(Path.Combine(DistDir, "patcher.js"))) return false;
+        foreach (var f in InstalledDiscords())
+            foreach (var res in ResourceDirs(f))
+            {
+                var app = Path.Combine(res, "app.asar");
+                if (File.Exists(Path.Combine(res, "_app.asar")) && File.Exists(app) && new FileInfo(app).Length < 4096
+                    && File.ReadAllText(app).Contains("DiscordNameHider"))
+                    return true;
+            }
+        return false;
+    }
+
+    static void CloseDiscord()
     {
         bool wasRunning = false;
         foreach (var f in Flavors)
@@ -61,10 +118,9 @@ static class Hider
                 try { p.Kill(); p.WaitForExit(5000); } catch { }
             }
         if (wasRunning) Thread.Sleep(1500);
-        return wasRunning;
     }
 
-    public static void StartDiscord(string flavor)
+    static void StartDiscord(string flavor)
     {
         var updater = Path.Combine(LocalApp, flavor, "Update.exe");
         if (File.Exists(updater))
@@ -108,58 +164,38 @@ static class Hider
         }
     }
 
-    static Dictionary<string, object> ReadSettings()
+    static void WriteVencordSettings(bool enabled)
     {
+        Dictionary<string, object> s = null;
         try
         {
-            if (File.Exists(SettingsFile))
-            {
-                var obj = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(SettingsFile)) as Dictionary<string, object>;
-                if (obj != null) return obj;
-            }
+            if (File.Exists(VencordSettings))
+                s = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(VencordSettings)) as Dictionary<string, object>;
         }
         catch { }
-        return new Dictionary<string, object>();
-    }
+        if (s == null) s = new Dictionary<string, object>();
 
-    public static string ReadHiddenUsers()
-    {
-        object plugins, hu, users;
-        var s = ReadSettings();
-        if (s.TryGetValue("plugins", out plugins) && plugins is Dictionary<string, object>
-            && ((Dictionary<string, object>)plugins).TryGetValue("HideUsers", out hu) && hu is Dictionary<string, object>
-            && ((Dictionary<string, object>)hu).TryGetValue("users", out users) && users is string)
-            return string.Join(Environment.NewLine, ((string)users).Split(',').Select(x => x.Trim()).Where(x => x.Length > 0));
-        return "";
-    }
-
-    static void WriteSettings(string users, bool enabled)
-    {
-        var s = ReadSettings();
         object pluginsObj;
         var plugins = s.TryGetValue("plugins", out pluginsObj) && pluginsObj is Dictionary<string, object>
             ? (Dictionary<string, object>)pluginsObj : new Dictionary<string, object>();
-        plugins["HideUsers"] = new Dictionary<string, object> { { "enabled", enabled }, { "users", users } };
+        plugins["HideUsers"] = new Dictionary<string, object> { { "enabled", enabled } };
         s["plugins"] = plugins;
         // Keep the bundled build: Vencord's own updater would replace it and drop HideUsers.
         s["autoUpdate"] = false;
         s["autoUpdateNotification"] = false;
-        Directory.CreateDirectory(Path.GetDirectoryName(SettingsFile));
-        File.WriteAllText(SettingsFile, new JavaScriptSerializer().Serialize(s));
+        Directory.CreateDirectory(Path.GetDirectoryName(VencordSettings));
+        File.WriteAllText(VencordSettings, new JavaScriptSerializer().Serialize(s));
     }
 
-    public static string Apply(string userText)
+    public static void Install()
     {
-        var users = string.Join(", ", userText
-            .Split(new[] { '\r', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(x => x.Trim()).Where(x => x.Length > 0));
-
         var flavors = InstalledDiscords();
         if (flavors.Count == 0) throw new Exception("Discord desktop app was not found on this PC.");
 
         CloseDiscord();
         ExtractDist();
-        WriteSettings(users, true);
+        WriteVencordSettings(true);
+        if (!File.Exists(StateFile)) SaveState(new HiderState());
 
         int patched = 0;
         foreach (var f in flavors)
@@ -178,10 +214,9 @@ static class Hider
         if (patched == 0) throw new Exception("Could not find Discord's app files to patch.");
 
         foreach (var f in flavors) StartDiscord(f);
-        return users;
     }
 
-    public static void Remove()
+    public static void Uninstall()
     {
         CloseDiscord();
         foreach (var f in InstalledDiscords())
@@ -193,78 +228,285 @@ static class Hider
                 if (File.Exists(app)) File.Delete(app);
                 File.Move(orig, app);
             }
-        try { WriteSettings("", false); } catch { }
-        try { Directory.Delete(Path.GetDirectoryName(DistDir), true); } catch { }
+        try { WriteVencordSettings(false); } catch { }
+        try { Directory.Delete(DistDir, true); } catch { }
         foreach (var f in InstalledDiscords()) StartDiscord(f);
+    }
+}
+
+/* ======================= UI ======================= */
+
+static class Theme
+{
+    public static readonly Color Bg = Color.FromArgb(43, 45, 49);
+    public static readonly Color Card = Color.FromArgb(30, 31, 34);
+    public static readonly Color Input = Color.FromArgb(56, 58, 64);
+    public static readonly Color Text = Color.FromArgb(242, 243, 245);
+    public static readonly Color Muted = Color.FromArgb(148, 155, 164);
+    public static readonly Color Blurple = Color.FromArgb(88, 101, 242);
+    public static readonly Color Green = Color.FromArgb(35, 165, 90);
+    public static readonly Color Red = Color.FromArgb(218, 55, 60);
+    public static readonly Color Grey = Color.FromArgb(78, 80, 88);
+}
+
+// Flat iOS-style switch.
+class ToggleSwitch : Control
+{
+    bool on;
+    public event EventHandler Toggled;
+    public bool On { get { return on; } set { on = value; Invalidate(); } }
+
+    public ToggleSwitch()
+    {
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.SupportsTransparentBackColor, true);
+        Size = new Size(52, 28);
+        Cursor = Cursors.Hand;
+        BackColor = Color.Transparent;
+    }
+
+    protected override void OnClick(EventArgs e)
+    {
+        On = !On;
+        if (Toggled != null) Toggled(this, EventArgs.Empty);
+        base.OnClick(e);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        int h = Height - 1, w = Width - 1;
+        using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+        {
+            path.AddArc(0, 0, h, h, 90, 180);
+            path.AddArc(w - h, 0, h, h, 270, 180);
+            path.CloseFigure();
+            using (var b = new SolidBrush(on ? Theme.Green : Theme.Grey)) g.FillPath(b, path);
+        }
+        int knob = h - 6;
+        int x = on ? w - knob - 3 : 3;
+        using (var b = new SolidBrush(Color.White)) g.FillEllipse(b, x, 3, knob, knob);
     }
 }
 
 class MainForm : Form
 {
-    readonly TextBox box;
-    readonly Label status;
-    static readonly Color Bg = Color.FromArgb(49, 51, 56);
-    static readonly Color Panel = Color.FromArgb(30, 31, 34);
-    static readonly Color Blurple = Color.FromArgb(88, 101, 242);
+    HiderState state;
+    DateTime lastWrite;
+    bool loading;
+
+    readonly ToggleSwitch master;
+    readonly Label masterText, masterSub, installBadge, footer;
+    readonly ListView list;
+    readonly TextBox addValue, addLabel;
+    readonly Button installBtn;
+    readonly System.Windows.Forms.Timer watch;
 
     public MainForm()
     {
         Text = "Discord Name Hider";
-        ClientSize = new Size(440, 430);
+        ClientSize = new Size(520, 600);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Bg;
-        ForeColor = Color.White;
-        Font = new Font("Segoe UI", 10f);
+        BackColor = Theme.Bg;
+        ForeColor = Theme.Text;
+        Font = new Font("Segoe UI", 9.5f);
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-        var title = new Label { Text = "Hide people in Discord", Font = new Font("Segoe UI Semibold", 15f), AutoSize = true, Location = new Point(18, 14) };
-        var help = new Label
+        // Header
+        Controls.Add(new Label { Text = "Discord Name Hider", Font = new Font("Segoe UI Semibold", 16f), AutoSize = true, Location = new Point(20, 16) });
+        installBadge = new Label { AutoSize = true, Location = new Point(23, 52), Font = new Font("Segoe UI", 9f) };
+        Controls.Add(installBadge);
+
+        // Master switch card
+        var card = new Panel { Location = new Point(20, 80), Size = new Size(480, 70), BackColor = Theme.Card };
+        masterText = new Label { Font = new Font("Segoe UI Semibold", 12f), AutoSize = true, Location = new Point(16, 12) };
+        masterSub = new Label { ForeColor = Theme.Muted, AutoSize = true, Location = new Point(17, 40), Font = new Font("Segoe UI", 8.75f) };
+        master = new ToggleSwitch { Location = new Point(410, 21) };
+        master.Toggled += (s, e) => { state.enabled = master.On; Save(); };
+        card.Controls.AddRange(new Control[] { masterText, masterSub, master });
+        Controls.Add(card);
+
+        // People list
+        Controls.Add(new Label { Text = "PEOPLE  -  tick = hidden, untick = visible", ForeColor = Theme.Muted, Font = new Font("Segoe UI Semibold", 8.5f), AutoSize = true, Location = new Point(20, 166) });
+        list = new ListView
         {
-            Text = "One per line: username or User ID.\nUser ID is best (Discord > Settings > Advanced > Developer Mode,\nthen right-click a person > Copy User ID).",
-            ForeColor = Color.FromArgb(181, 186, 193), AutoSize = true, Location = new Point(20, 50), Font = new Font("Segoe UI", 9f)
+            Location = new Point(20, 188), Size = new Size(480, 230), View = View.Details, CheckBoxes = true,
+            FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, BorderStyle = BorderStyle.None,
+            BackColor = Theme.Card, ForeColor = Theme.Text, Font = new Font("Segoe UI", 10f), MultiSelect = true
         };
-        box = new TextBox
+        list.Columns.Add("Username or User ID", 250);
+        list.Columns.Add("Note", 205);
+        list.ItemChecked += (s, e) =>
         {
-            Multiline = true, ScrollBars = ScrollBars.Vertical, Location = new Point(20, 112), Size = new Size(400, 180),
-            BackColor = Panel, ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Consolas", 11f),
-            Text = Hider.ReadHiddenUsers()
+            if (loading) return;
+            var p = (Person)e.Item.Tag;
+            p.hidden = e.Item.Checked;
+            Save();
         };
-        var hide = MakeButton("Hide them", Blurple, new Point(20, 306), new Size(400, 42));
-        hide.Click += (s, e) => Run(() =>
+        list.KeyDown += (s, e) => { if (e.KeyCode == Keys.Delete) RemoveSelected(); };
+        Controls.Add(list);
+
+        // Add row
+        addValue = MakeInput(new Point(20, 430), 210, "Username or User ID");
+        addLabel = MakeInput(new Point(238, 430), 160, "Note (optional)");
+        var addBtn = MakeButton("Add", Theme.Blurple, new Point(406, 429), new Size(94, 30));
+        addBtn.Click += (s, e) => AddPerson();
+        addValue.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { AddPerson(); e.SuppressKeyPress = true; } };
+        addLabel.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { AddPerson(); e.SuppressKeyPress = true; } };
+        Controls.AddRange(new Control[] { addValue, addLabel, addBtn });
+
+        var removeBtn = MakeButton("Remove selected", Theme.Grey, new Point(20, 468), new Size(140, 30));
+        removeBtn.Click += (s, e) => RemoveSelected();
+        var allOn = MakeButton("Hide all", Theme.Grey, new Point(168, 468), new Size(90, 30));
+        allOn.Click += (s, e) => SetAll(true);
+        var allOff = MakeButton("Show all", Theme.Grey, new Point(266, 468), new Size(90, 30));
+        allOff.Click += (s, e) => SetAll(false);
+        Controls.AddRange(new Control[] { removeBtn, allOn, allOff });
+
+        Controls.Add(new Label
         {
-            var u = Hider.Apply(box.Text);
-            return u.Length == 0 ? "Done. Nobody is hidden (list is empty)." : "Done! Discord restarted. Hidden: " + u;
+            Text = "Tip: get a User ID in Discord > Settings > Advanced > Developer Mode, then right-click a person > Copy User ID.\nIn Discord, press Ctrl+Shift+H to switch hiding on/off.",
+            ForeColor = Theme.Muted, Font = new Font("Segoe UI", 8.5f), Location = new Point(20, 508), Size = new Size(480, 36)
         });
-        var remove = MakeButton("Remove tool / show everyone", Color.FromArgb(78, 80, 88), new Point(20, 356), new Size(400, 32));
-        remove.Click += (s, e) =>
+
+        // Footer
+        installBtn = MakeButton("", Theme.Blurple, new Point(20, 552), new Size(200, 32));
+        installBtn.Click += (s, e) => InstallOrUninstall();
+        footer = new Label { ForeColor = Theme.Muted, Location = new Point(230, 552), Size = new Size(270, 32), TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 8.75f) };
+        Controls.AddRange(new Control[] { installBtn, footer });
+
+        state = Hider.LoadState();
+        RefreshAll();
+
+        // Pick up changes made from inside Discord (Ctrl+Shift+H).
+        watch = new System.Windows.Forms.Timer { Interval = 1000 };
+        watch.Tick += (s, e) =>
         {
-            if (MessageBox.Show("Restore Discord to normal?", Text, MessageBoxButtons.YesNo) != DialogResult.Yes) return;
-            Run(() => { Hider.Remove(); return "Removed. Discord is back to normal."; });
+            try
+            {
+                if (File.Exists(Hider.StateFile) && File.GetLastWriteTimeUtc(Hider.StateFile) > lastWrite.AddMilliseconds(200))
+                {
+                    lastWrite = File.GetLastWriteTimeUtc(Hider.StateFile);
+                    state = Hider.LoadState();
+                    RefreshAll();
+                }
+            }
+            catch { }
         };
-        status = new Label { AutoSize = false, Location = new Point(20, 396), Size = new Size(400, 30), ForeColor = Color.FromArgb(181, 186, 193), Font = new Font("Segoe UI", 9f) };
+        watch.Start();
+    }
 
-        if (Hider.InstalledDiscords().Count == 0) status.Text = "Discord desktop app not found.";
+    TextBox MakeInput(Point loc, int width, string placeholder)
+    {
+        var tb = new TextBox { Location = loc, Width = width, BackColor = Theme.Input, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 10.5f) };
+        SetCue(tb, placeholder);
+        return tb;
+    }
 
-        Controls.AddRange(new Control[] { title, help, box, hide, remove, status });
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+    static void SetCue(TextBox tb, string text)
+    {
+        tb.HandleCreated += (s, e) => SendMessage(tb.Handle, 0x1501, (IntPtr)1, text); // EM_SETCUEBANNER
     }
 
     Button MakeButton(string text, Color color, Point loc, Size size)
     {
-        var b = new Button { Text = text, Location = loc, Size = size, FlatStyle = FlatStyle.Flat, BackColor = color, ForeColor = Color.White, Cursor = Cursors.Hand };
+        var b = new Button { Text = text, Location = loc, Size = size, FlatStyle = FlatStyle.Flat, BackColor = color, ForeColor = Color.White, Cursor = Cursors.Hand, Font = new Font("Segoe UI Semibold", 9.5f) };
         b.FlatAppearance.BorderSize = 0;
         return b;
     }
 
-    void Run(Func<string> action)
+    void RefreshAll()
     {
-        UseWaitCursor = true;
-        Enabled = false;
-        status.Text = "Working... (Discord will close and reopen)";
+        loading = true;
+        master.On = state.enabled;
+        masterText.Text = state.enabled ? "Hiding is ON" : "Hiding is OFF";
+        masterText.ForeColor = state.enabled ? Theme.Text : Theme.Muted;
+        var count = state.users.Count(u => u.hidden);
+        masterSub.Text = state.enabled
+            ? count + " of " + state.users.Count + " people hidden. Turn off to see everyone."
+            : "Everyone is visible. Turn on to hide the ticked people again.";
+
+        list.BeginUpdate();
+        list.Items.Clear();
+        foreach (var p in state.users)
+        {
+            var item = new ListViewItem(new[] { p.value, p.label ?? "" }) { Checked = p.hidden, Tag = p };
+            if (!state.enabled) item.ForeColor = Theme.Muted;
+            list.Items.Add(item);
+        }
+        list.EndUpdate();
+        loading = false;
+
+        bool installed = Hider.IsInstalled();
+        bool hasDiscord = Hider.InstalledDiscords().Count > 0;
+        installBadge.Text = !hasDiscord ? "●  Discord desktop app not found"
+            : installed ? "●  Active in Discord - changes apply instantly" : "●  Not installed in Discord yet";
+        installBadge.ForeColor = !hasDiscord ? Theme.Red : installed ? Theme.Green : Color.FromArgb(240, 178, 50);
+        installBtn.Text = installed ? "Uninstall from Discord" : "Install into Discord";
+        installBtn.BackColor = installed ? Theme.Grey : Theme.Blurple;
+        installBtn.Enabled = hasDiscord;
+        if (!installed && hasDiscord && footer.Text.Length == 0) footer.Text = "One-time setup: Discord will restart once.";
+    }
+
+    void Save()
+    {
+        try
+        {
+            Hider.SaveState(state);
+            lastWrite = File.GetLastWriteTimeUtc(Hider.StateFile);
+            RefreshAll();
+        }
+        catch (Exception ex) { footer.Text = "Could not save: " + ex.Message; footer.ForeColor = Theme.Red; }
+    }
+
+    void AddPerson()
+    {
+        var v = addValue.Text.Trim().TrimStart('@');
+        if (v.Length == 0) return;
+        if (state.users.Any(u => string.Equals(u.value, v, StringComparison.OrdinalIgnoreCase)))
+        {
+            footer.Text = v + " is already in the list."; footer.ForeColor = Theme.Muted;
+            return;
+        }
+        state.users.Add(new Person { value = v, label = addLabel.Text.Trim(), hidden = true });
+        addValue.Clear(); addLabel.Clear(); addValue.Focus();
+        Save();
+    }
+
+    void RemoveSelected()
+    {
+        if (list.SelectedItems.Count == 0) return;
+        foreach (ListViewItem it in list.SelectedItems) state.users.Remove((Person)it.Tag);
+        Save();
+    }
+
+    void SetAll(bool hidden)
+    {
+        foreach (var p in state.users) p.hidden = hidden;
+        Save();
+    }
+
+    void InstallOrUninstall()
+    {
+        bool installed = Hider.IsInstalled();
+        if (installed && MessageBox.Show("Remove the tool from Discord and show everyone?\nYour list is kept.", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            return;
+
+        UseWaitCursor = true; Enabled = false;
+        footer.ForeColor = Theme.Muted;
+        footer.Text = "Working... Discord will close and reopen.";
         Refresh();
-        try { status.Text = action(); status.ForeColor = Color.FromArgb(35, 165, 90); }
-        catch (Exception ex) { status.Text = "Error: " + ex.Message; status.ForeColor = Color.FromArgb(242, 63, 67); }
-        finally { Enabled = true; UseWaitCursor = false; }
+        try
+        {
+            if (installed) Hider.Uninstall(); else Hider.Install();
+            footer.ForeColor = Theme.Green;
+            footer.Text = installed ? "Removed. Discord is back to normal." : "Installed! Discord is restarting.";
+        }
+        catch (Exception ex) { footer.ForeColor = Theme.Red; footer.Text = "Error: " + ex.Message; }
+        finally { Enabled = true; UseWaitCursor = false; RefreshAll(); }
     }
 }

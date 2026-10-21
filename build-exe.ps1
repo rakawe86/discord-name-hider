@@ -14,7 +14,9 @@ Push-Location $vencord
 try {
     if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) { npm install -g pnpm@11.9.0 }
     pnpm install --frozen-lockfile
+    if ($LASTEXITCODE -ne 0) { throw "pnpm install failed" }
     pnpm build
+    if ($LASTEXITCODE -ne 0) { throw "Vencord build failed" }
 } finally { Pop-Location }
 
 $dist = Join-Path $vencord "dist"
