@@ -17,7 +17,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Discord Name Hider")]
 [assembly: AssemblyProduct("Discord Name Hider")]
-[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
 
 static class Program
 {
@@ -423,12 +423,12 @@ class MainForm : Form
     {
         loading = true;
         master.On = state.enabled;
-        masterText.Text = state.enabled ? "Hiding is ON" : "Hiding is OFF";
+        masterText.Text = state.enabled ? "Hide everyone  -  ON" : "Hide everyone  -  OFF";
         masterText.ForeColor = state.enabled ? Theme.Text : Theme.Muted;
         var count = state.users.Count(u => u.hidden);
         masterSub.Text = state.enabled
-            ? count + " of " + state.users.Count + " people hidden. Turn off to see everyone."
-            : "Everyone is visible. Turn on to hide the ticked people again.";
+            ? count + " of " + state.users.Count + " people on your list are hidden right now."
+            : "Paused: everyone on your list is visible. Switch on to hide them again.";
 
         list.BeginUpdate();
         list.Items.Clear();

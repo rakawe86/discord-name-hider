@@ -22,7 +22,10 @@ interface State { enabled: boolean; users: Entry[]; }
 let state: State = { enabled: true, users: [] };
 let lastMtime = 0;
 let active = new Set<string>(); // lowercased ids/usernames currently hidden
-const droppedChannels = new Set<string>();
+// channelId -> authors whose live messages were held back while hidden
+const dropped = new Map<string, Set<string>>();
+// the held-back MESSAGE_CREATE events, replayed if a channel can't be re-downloaded
+const held: any[] = [];
 
 function rebuildActive() {
     active = new Set(
@@ -52,7 +55,11 @@ function interceptor(action: any): boolean {
     switch (action.type) {
         case "MESSAGE_CREATE":
             if (isHidden(action.message?.author?.id)) {
-                droppedChannels.add(action.channelId ?? action.message.channel_id);
+                const channelId = action.channelId ?? action.message.channel_id;
+                if (!dropped.has(channelId)) dropped.set(channelId, new Set());
+                dropped.get(channelId)!.add(action.message.author.id);
+                held.push(action);
+                if (held.length > 500) held.shift();
                 return true; // no message, no unread badge, no notification
             }
             return false;
@@ -104,18 +111,55 @@ function wrapStores() {
 const STYLE_ID = "vc-hideusers-style";
 let observer: MutationObserver | null = null;
 
+const ID_RE = /^\d{15,21}$/;
+
+// Rows that show one person, and which React props carry that person's ID.
+const ROWS: [selector: string, pick: (p: any) => any][] = [
+    ["[class*='member_']", p => p.user?.id],                   // server member list, group DM members
+    ["[class*='voiceUser_']", p => p.user?.id],                // voice channel users
+    ["[class*='reactor_']", p => p.user?.id],                  // reaction popout
+    ["[class*='peopleListItem_']", p => p.user?.id],           // friends list rows
+    ["[class*='itemCard_']", p => p.user?.id ?? p.party?.priorityMembers?.[0]?.user?.id], // Active Now
+    ["[class~='mention']", p => p.userId],                     // @mentions inside messages
+    ["[class*='searchResult_']", p => p.message?.author?.id],  // search results
+    ["[class*='messageGroupWrapper_']", p => p.message?.author?.id] // pins / inbox
+];
+
+function reactFiber(el: Element): any {
+    for (const k in el) if (k.startsWith("__reactFiber$")) return (el as any)[k];
+    return null;
+}
+
+function idFromFiber(el: Element, pick: (p: any) => any): string | undefined {
+    let f = reactFiber(el);
+    for (let i = 0; f && i < 15; i++, f = f.return) {
+        if (!f.memoizedProps) continue;
+        let id: any;
+        try { id = pick(f.memoizedProps); } catch { }
+        if (typeof id === "string" && ID_RE.test(id)) return id;
+    }
+}
+
+function setTag(el: HTMLElement, id: string | undefined) {
+    if (id) { if (el.dataset.vcHuUid !== id) el.dataset.vcHuUid = id; }
+    else if (el.dataset.vcHuUid) delete el.dataset.vcHuUid;
+}
+
 function tag(root: ParentNode) {
-    root.querySelectorAll<HTMLElement>("li[id^='chat-messages-']:not([data-vc-hu-uid])").forEach(li => {
+    root.querySelectorAll<HTMLElement>("li[id^='chat-messages-']").forEach(li => {
         const m = li.id.match(/^chat-messages-(\d+)-(\d+)$/);
-        const author = m && (MessageStore.getMessage(m[1], m[2]) as any)?.author?.id;
-        if (author) li.dataset.vcHuUid = author;
+        const msg: any = m && MessageStore.getMessage(m[1], m[2]);
+        setTag(li, msg?.author?.id);
+        // "Replying to <hidden person>" header on someone else's message
+        const reply = li.querySelector<HTMLElement>("[class*='repliedMessage_']");
+        if (reply) {
+            const ref = msg?.messageReference;
+            const refMsg: any = ref && MessageStore.getMessage(ref.channel_id, ref.message_id);
+            setTag(reply, refMsg?.author?.id ?? idFromFiber(reply, p => p.referencedMessage?.message?.author?.id));
+        }
     });
-    root.querySelectorAll<HTMLImageElement>("img[src*='/avatars/'], img[src*='/users/']").forEach(img => {
-        const m = img.src.match(/\/(?:avatars|users)\/(\d{15,21})\//);
-        if (!m) return;
-        const row = img.closest<HTMLElement>("[class*='member_'], [class*='voiceUser_'], [class*='reactor_'], [class*='peopleListItem_']");
-        if (row && !row.dataset.vcHuUid) row.dataset.vcHuUid = m[1];
-    });
+    for (const [selector, pick] of ROWS)
+        root.querySelectorAll<HTMLElement>(selector).forEach(el => setTag(el, idFromFiber(el, pick)));
 }
 
 function updateCss() {
@@ -157,21 +201,47 @@ function stopDom() {
 
 function applyState(prevActive: Set<string>) {
     rebuildActive();
+    tag(document);
     updateCss();
     for (const store of [RelationshipStore, PrivateChannelSortStore, ChannelStore] as any[]) {
         try { store?.emitChange?.(); } catch { }
     }
-    // People were shown again: reload chats where their live messages were skipped.
+    // People were shown again: re-download chats where their live messages were held back,
+    // so those messages appear in the right place.
     const shownAgain = [...prevActive].some(v => !active.has(v));
-    if (shownAgain && droppedChannels.size) {
-        for (const channelId of droppedChannels) {
-            try { (MessageActions as any).fetchMessages?.({ channelId, limit: 50 }); } catch { }
+    if (shownAgain) restoreHeldMessages();
+}
+
+function restoreHeldMessages() {
+    const fetchMessages = (MessageActions as any)?.fetchMessages;
+    const replay: any[] = [];
+
+    for (const [channelId, authors] of dropped) {
+        for (const a of [...authors]) if (!isHidden(a)) authors.delete(a);
+        if (authors.size) continue; // someone in this chat is still hidden
+        dropped.delete(channelId);
+
+        const mine = held.filter(a => (a.channelId ?? a.message.channel_id) === channelId);
+        for (const a of mine) held.splice(held.indexOf(a), 1);
+
+        let reloaded = false;
+        if (typeof fetchMessages === "function") {
+            try { fetchMessages.call(MessageActions, { channelId, limit: 50 }); reloaded = true; } catch { }
         }
-        droppedChannels.clear();
+        if (!reloaded) replay.push(...mine);
+    }
+
+    // Fallback: put the held messages back, oldest first (IDs are time-ordered).
+    replay.sort((a, b) => (BigInt(a.message.id) < BigInt(b.message.id) ? -1 : 1));
+    for (const action of replay) {
+        try { FluxDispatcher.dispatch(action); } catch { }
     }
 }
 
 async function poll() {
+    // Re-check visible rows: Discord recycles list elements while scrolling.
+    if (active.size) { tag(document); updateCss(); }
+
     const res = await Native.readState(lastMtime).catch(() => null);
     if (!res) return;
     lastMtime = res.mtime;

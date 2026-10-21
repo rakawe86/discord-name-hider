@@ -16,7 +16,9 @@
 
 - **Hide people completely** from your friends list, DM list, chat messages, member lists, typing indicators and notifications
 - **Instant on/off**: tick or untick a person and Discord updates immediately, no restart
-- **Main switch** to show everyone for a moment, then hide them again with one click
+- **Hide everyone toggle**: one switch hides or shows everyone on your list at once
+- **Nothing slips through**: also hides replies to them, @mentions of them, search results, pins, reactions, voice channels and Active Now
+- **Nothing is lost**: messages they send while hidden appear in the right place when you show them again
 - **Shortcut in Discord**: press `Ctrl + Shift + H` to toggle hiding
 - **Private**: only changes what *you* see. Hidden people are not blocked and not notified
 - **Single .exe**: nothing else to install
