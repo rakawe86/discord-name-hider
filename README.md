@@ -29,7 +29,9 @@ One switch to hide, one switch to show. No restart, nothing to install.
 - ☑️ **Per-person checkboxes**: tick = hidden, untick = visible
 - ⚡ **Instant**: changes apply live, no Discord restart
 - ⌨️ **`Ctrl + Shift + H`** inside Discord toggles hiding
+- 📵 **Calls hidden too**: no ringing or call pop-up from hidden people
 - 🔍 **Nothing slips through**: replies, @mentions, search, pins, reactions, voice, Active Now
+- 🛡️ **Low profile**: Discord analytics, metrics and crash reports are blocked; no extra network requests
 - 💬 **Nothing is lost**: messages sent while hidden come back when you show them
 - 🔒 **Private**: only *you* see the change. Nobody is blocked or notified
 - 📦 **One .exe**: double-click and go
@@ -70,6 +72,20 @@ No. Nothing is sent to Discord or to them. They are not blocked; it only changes
 <summary><b>Do I need to reinstall after Discord updates?</b></summary>
 <br>
 No. It re-applies itself automatically after Discord updates.
+</details>
+
+<details>
+<summary><b>How do I update?</b></summary>
+<br>
+Download the new .exe and open it. It shows <b>New version available</b>; click <b>Update</b>. Your list is kept.
+</details>
+
+<details>
+<summary><b>Can Discord ban me?</b></summary>
+<br>
+Client mods are against Discord's Terms, so the risk is never zero. This tool keeps it low: it only changes what
+your screen shows, sends nothing extra to Discord, automates nothing, and keeps Discord's analytics and crash
+reporting blocked so nothing about the mod is reported.
 </details>
 
 <details>

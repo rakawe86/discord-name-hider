@@ -17,7 +17,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Discord Name Hider")]
 [assembly: AssemblyProduct("Discord Name Hider")]
-[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
 
 static class Program
 {
@@ -108,6 +108,24 @@ static class Hider
         return false;
     }
 
+    // True when the installed files differ from the ones bundled in this exe.
+    public static bool NeedsUpdate()
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        foreach (var name in DistFiles)
+        {
+            var path = Path.Combine(DistDir, name);
+            if (!File.Exists(path)) return true;
+            using (var s = asm.GetManifestResourceStream("vc." + name))
+            using (var ms = new MemoryStream())
+            {
+                s.CopyTo(ms);
+                if (!ms.ToArray().SequenceEqual(File.ReadAllBytes(path))) return true;
+            }
+        }
+        return false;
+    }
+
     static void CloseDiscord()
     {
         bool wasRunning = false;
@@ -179,6 +197,9 @@ static class Hider
         var plugins = s.TryGetValue("plugins", out pluginsObj) && pluginsObj is Dictionary<string, object>
             ? (Dictionary<string, object>)pluginsObj : new Dictionary<string, object>();
         plugins["HideUsers"] = new Dictionary<string, object> { { "enabled", enabled } };
+        // Safety: keep Discord's analytics, metrics and Sentry crash reports blocked,
+        // so nothing about the client mod is reported back to Discord.
+        plugins["NoTrack"] = new Dictionary<string, object> { { "enabled", true }, { "disableAnalytics", true } };
         s["plugins"] = plugins;
         // Keep the bundled build: Vencord's own updater would replace it and drop HideUsers.
         s["autoUpdate"] = false;
@@ -293,7 +314,7 @@ class MainForm : Form
 {
     HiderState state;
     DateTime lastWrite;
-    bool loading;
+    bool loading, needsUpdate, recheck = true;
 
     readonly ToggleSwitch master;
     readonly Label masterText, masterSub, installBadge, footer;
@@ -453,11 +474,13 @@ class MainForm : Form
 
         bool installed = Hider.IsInstalled();
         bool hasDiscord = Hider.InstalledDiscords().Count > 0;
+        if (recheck) { needsUpdate = installed && Hider.NeedsUpdate(); recheck = false; }
         installBadge.Text = !hasDiscord ? "●  Discord desktop app not found"
+            : needsUpdate ? "●  New version available - click Update"
             : installed ? "●  Active in Discord - changes apply instantly" : "●  Not installed in Discord yet";
-        installBadge.ForeColor = !hasDiscord ? Theme.Red : installed ? Theme.Green : Color.FromArgb(240, 178, 50);
-        installBtn.Text = installed ? "Uninstall from Discord" : "Install into Discord";
-        installBtn.BackColor = installed ? Theme.Grey : Theme.Blurple;
+        installBadge.ForeColor = !hasDiscord ? Theme.Red : installed && !needsUpdate ? Theme.Green : Color.FromArgb(240, 178, 50);
+        installBtn.Text = needsUpdate ? "Update (Discord restarts)" : installed ? "Uninstall from Discord" : "Install into Discord";
+        installBtn.BackColor = installed && !needsUpdate ? Theme.Grey : Theme.Blurple;
         installBtn.Enabled = hasDiscord;
         if (!installed && hasDiscord && footer.Text.Length == 0) footer.Text = "One-time setup: Discord will restart once.";
     }
@@ -502,7 +525,7 @@ class MainForm : Form
 
     void InstallOrUninstall()
     {
-        bool installed = Hider.IsInstalled();
+        bool installed = Hider.IsInstalled() && !needsUpdate;
         if (installed && MessageBox.Show("Remove the tool from Discord and show everyone?\nYour list is kept.", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             return;
 
@@ -517,6 +540,6 @@ class MainForm : Form
             footer.Text = installed ? "Removed. Discord is back to normal." : "Installed! Discord is restarting.";
         }
         catch (Exception ex) { footer.ForeColor = Theme.Red; footer.Text = "Error: " + ex.Message; }
-        finally { Enabled = true; UseWaitCursor = false; RefreshAll(); }
+        finally { Enabled = true; UseWaitCursor = false; recheck = true; RefreshAll(); }
     }
 }

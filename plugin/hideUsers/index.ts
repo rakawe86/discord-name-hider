@@ -11,7 +11,7 @@
 
 import definePlugin, { PluginNative } from "@utils/types";
 import { findStoreLazy } from "@webpack";
-import { ChannelStore, FluxDispatcher, MessageActions, MessageStore, RelationshipStore, showToast, UserStore } from "@webpack/common";
+import { ChannelStore, FluxDispatcher, MessageActions, MessageStore, RelationshipStore, showToast, UserStore, VoiceStateStore } from "@webpack/common";
 
 const Native = VencordNative.pluginHelpers.HideUsers as PluginNative<typeof import("./native")>;
 const PrivateChannelSortStore = findStoreLazy("PrivateChannelSortStore");
@@ -66,8 +66,44 @@ function interceptor(action: any): boolean {
         case "TYPING_START":
         case "SPEAKING":
             return isHidden(action.userId);
+
+        /* Calls: no ringing, no call pop-up, no "in call" banner from hidden people. */
+        case "VOICE_STATE_UPDATES":
+            if (Array.isArray(action.voiceStates))
+                action.voiceStates = action.voiceStates.filter((vs: any) => {
+                    if (!isHidden(vs?.userId) || !isPrivateChannel(vs.channelId ?? lastCallChannel.get(vs.userId))) return true;
+                    if (vs.channelId) { hiddenCallers.add(vs.channelId); lastCallChannel.set(vs.userId, vs.channelId); }
+                    else lastCallChannel.delete(vs.userId);
+                    return false;
+                });
+            return false;
+        case "CALL_CREATE":
+        case "CALL_UPDATE":
+            return isHiddenCall(action.channelId);
+        case "CALL_DELETE":
+            hiddenCallers.delete(action.channelId);
+            return false;
     }
     return false;
+}
+
+// DM / group DM channels where a hidden person is in a call
+const hiddenCallers = new Set<string>();
+const lastCallChannel = new Map<string, string>();
+
+function isPrivateChannel(channelId?: string | null) {
+    const type = channelId && (ChannelStore.getChannel(channelId) as any)?.type;
+    return type === 1 || type === 3; // DM or group DM
+}
+
+function isHiddenCall(channelId: string) {
+    if (isHiddenDm(channelId)) return true;
+    // Group DM: hide the call while only hidden people are in it.
+    // (Hidden people's voice states are filtered out above, so the store only holds visible ones.)
+    if (!hiddenCallers.has(channelId)) return false;
+    const states = (VoiceStateStore as any)?.getVoiceStatesForChannel?.(channelId) ?? {};
+    const me = UserStore.getCurrentUser()?.id;
+    return Object.keys(states).every(id => id === me);
 }
 
 /* ---------- Store wrappers: friends list + DM list ---------- */
