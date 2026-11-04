@@ -107,13 +107,18 @@ Check "5,000 people: open + tick under 5s" ($t -lt 5000) "${t}ms"
 
 # --- save while something else holds the file (Discord polling, antivirus) ---
 WriteState (People 3); $save = $hider.GetMethod("SaveState", $all); $st = [Activator]::CreateInstance($asm.GetType("HiderState"))
-$flag = [hashtable]::Synchronized(@{ Stop = $false })
-$rs = [PowerShell]::Create(); [void]$rs.AddScript({ param($p, $flag) while (-not $flag.Stop) { try { $h = [IO.File]::Open($p, 'Open', 'Read', 'Read'); [Threading.Thread]::Sleep(3); $h.Close() } catch {} } }).AddArgument($tmp).AddArgument($flag)
-$ar = $rs.BeginInvoke()
-$bad = 0; $why = ""; $lost = 0
-foreach ($r in 1..300) { try { [void]$save.Invoke($null, @($st)) } catch { $bad++; $why = Inner $_.Exception }; if (-not (Test-Path $tmp)) { $lost++ } }
-$flag.Stop = $true; [void]$rs.EndInvoke($ar)
-Check "300 saves while the file is being read: none fail, file never lost" ($bad -eq 0 -and $lost -eq 0) "$bad failed, file missing $lost times: $why"
+function SaveWhileHeld($gapMs, $saves) {
+    $flag = [hashtable]::Synchronized(@{ Stop = $false })
+    $rs = [PowerShell]::Create(); [void]$rs.AddScript({ param($p, $flag, $gap) while (-not $flag.Stop) { try { $h = [IO.File]::Open($p, 'Open', 'Read', 'Read'); [Threading.Thread]::Sleep(3); $h.Close() } catch {}; if ($gap) { [Threading.Thread]::Sleep($gap) } } }).AddArgument($tmp).AddArgument($flag).AddArgument($gapMs)
+    $ar = $rs.BeginInvoke(); $bad = 0; $why = ""; $lost = 0
+    foreach ($r in 1..$saves) { try { [void]$save.Invoke($null, @($st)) } catch { $bad++; $why = Inner $_.Exception }; if (-not (Test-Path $tmp)) { $lost++ } }
+    $flag.Stop = $true; [void]$rs.EndInvoke($ar); $rs.Dispose()
+    @{ Bad = $bad; Lost = $lost; Why = $why }
+}
+$x = SaveWhileHeld 0 100
+Check "file held almost nonstop: a save may be refused, the file is never lost" ($x.Lost -eq 0) "missing $($x.Lost) times"
+$x = SaveWhileHeld 20 300
+Check "300 saves while the file is read repeatedly: none fail, file never lost" ($x.Bad -eq 0 -and $x.Lost -eq 0) "$($x.Bad) failed, missing $($x.Lost) times: $($x.Why)"
 
 # --- install / uninstall on a fake Discord ---
 function FakeDiscord($ver) { $res = "$local\FakeDiscord0\app-$ver\resources"; New-Item -ItemType Directory -Force $res | Out-Null; [IO.File]::WriteAllText("$res\app.asar", "ORIGINAL-$ver"); $res }
