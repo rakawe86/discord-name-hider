@@ -4,7 +4,7 @@
  */
 
 import { app } from "electron";
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 
 const STATE_FILE = join(app.getPath("appData"), "DiscordNameHider", "state.json");
@@ -16,11 +16,14 @@ export function readState(_: unknown, lastMtime: number) {
         if (mtime === lastMtime) return null;
         return { mtime, text: readFileSync(STATE_FILE, "utf8") };
     } catch {
-        return lastMtime === -1 ? null : { mtime: -1, text: "" };
+        return null; // locked or mid-replace: keep the current list, retry next poll
     }
 }
 
 export function writeState(_: unknown, text: string) {
     mkdirSync(dirname(STATE_FILE), { recursive: true });
-    writeFileSync(STATE_FILE, text);
+    // Atomic: the tool never sees a half-written list.
+    const tmp = STATE_FILE + ".plugin.tmp";
+    writeFileSync(tmp, text);
+    renameSync(tmp, STATE_FILE);
 }

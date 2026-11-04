@@ -1,0 +1,36 @@
+name: Build
+
+on:
+  push:
+    branches: [main, signing-ci]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install pnpm
+        run: npm install -g pnpm@11.9.0
+      - name: Build
+        run: .\build-exe.ps1
+      - name: Test the plugin
+        run: node tests/plugin-stress.mjs
+      - name: Test the app
+        run: powershell -STA -ExecutionPolicy Bypass -File tests\stress.ps1
+      - name: Upload the exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiscordNameHider
+          path: out/DiscordNameHider.exe
+          if-no-files-found: error

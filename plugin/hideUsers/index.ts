@@ -11,7 +11,7 @@
 
 import definePlugin, { PluginNative } from "@utils/types";
 import { findStoreLazy } from "@webpack";
-import { ChannelStore, FluxDispatcher, MessageActions, MessageStore, RelationshipStore, showToast, UserStore, VoiceStateStore } from "@webpack/common";
+import { ChannelStore, FluxDispatcher, MessageActions, MessageStore, RelationshipStore, SelectedChannelStore, showToast, UserStore, VoiceStateStore } from "@webpack/common";
 
 const Native = VencordNative.pluginHelpers.HideUsers as PluginNative<typeof import("./native")>;
 const PrivateChannelSortStore = findStoreLazy("PrivateChannelSortStore");
@@ -23,7 +23,9 @@ let state: State = { enabled: true, users: [] };
 let lastMtime = 0;
 let active = new Set<string>(); // lowercased ids/usernames currently hidden
 // channelId -> authors whose live messages were held back while hidden
-const dropped = new Map<string, Set<string>>();
+const dropped = new Map<string, Map<string, any>>();
+// chats to re-download when next opened, so showing someone never bursts requests at Discord
+const pendingReload = new Set<string>();
 // the held-back MESSAGE_CREATE events, replayed if a channel can't be re-downloaded
 const held: any[] = [];
 
@@ -37,10 +39,18 @@ function rebuildActive() {
 
 function isHidden(userId?: string | null): boolean {
     if (!userId || active.size === 0) return false;
+    // Never hide yourself: your own sent messages would get stuck.
+    if (userId === UserStore.getCurrentUser()?.id) return false;
     if (active.has(userId)) return true;
     const user: any = UserStore.getUser(userId);
     if (!user) return false;
     return active.has(user.username?.toLowerCase()) || active.has(user.globalName?.toLowerCase());
+}
+
+// Message authors carry their own names, for people Discord hasn't cached yet.
+function isHiddenAuthor(author: any): boolean {
+    if (!author?.id || author.id === UserStore.getCurrentUser()?.id) return false;
+    return isHidden(author.id) || active.has(author.username?.toLowerCase()) || active.has(author.global_name?.toLowerCase());
 }
 
 function isHiddenDm(channelId: string): boolean {
@@ -52,16 +62,24 @@ function isHiddenDm(channelId: string): boolean {
 /* ---------- Flux interceptor: silence live events from hidden people ---------- */
 
 function interceptor(action: any): boolean {
+    // An error here must never break Discord's event system.
+    try { return intercept(action); } catch (e) { console.error("[HideUsers]", e); return false; }
+}
+
+function intercept(action: any): boolean {
     switch (action.type) {
         case "MESSAGE_CREATE":
-            if (isHidden(action.message?.author?.id)) {
+            if (isHiddenAuthor(action.message?.author)) {
                 const channelId = action.channelId ?? action.message.channel_id;
-                if (!dropped.has(channelId)) dropped.set(channelId, new Set());
-                dropped.get(channelId)!.add(action.message.author.id);
+                if (!dropped.has(channelId)) dropped.set(channelId, new Map());
+                dropped.get(channelId)!.set(action.message.author.id, action.message.author);
                 held.push(action);
                 if (held.length > 500) held.shift();
                 return true; // no message, no unread badge, no notification
             }
+            return false;
+        case "CHANNEL_SELECT":
+            if (pendingReload.has(action.channelId)) setTimeout(reloadIfPending, 0, action.channelId);
             return false;
         case "TYPING_START":
         case "SPEAKING":
@@ -217,11 +235,12 @@ function startDom() {
     tag(document);
     updateCss();
     observer = new MutationObserver(muts => {
+        if (!active.size) return; // nothing to hide: don't slow Discord down
         let added = false;
         for (const m of muts) m.addedNodes.forEach(n => {
             if (n instanceof Element) { tag(n.parentNode ?? n); added = true; }
         });
-        if (added && active.size) updateCss();
+        if (added) updateCss();
     });
     observer.observe(document.body, { childList: true, subtree: true });
 }
@@ -249,29 +268,33 @@ function applyState(prevActive: Set<string>) {
 }
 
 function restoreHeldMessages() {
-    const fetchMessages = (MessageActions as any)?.fetchMessages;
-    const replay: any[] = [];
+    const canFetch = typeof (MessageActions as any)?.fetchMessages === "function";
 
     for (const [channelId, authors] of dropped) {
-        for (const a of [...authors]) if (!isHidden(a)) authors.delete(a);
-        if (authors.size) continue; // someone in this chat is still hidden
-        dropped.delete(channelId);
-
-        const mine = held.filter(a => (a.channelId ?? a.message.channel_id) === channelId);
-        for (const a of mine) held.splice(held.indexOf(a), 1);
-
-        let reloaded = false;
-        if (typeof fetchMessages === "function") {
-            try { fetchMessages.call(MessageActions, { channelId, limit: 50 }); reloaded = true; } catch { }
-        }
-        if (!reloaded) replay.push(...mine);
+        const before = authors.size;
+        for (const [id, author] of [...authors]) if (!isHiddenAuthor(author)) authors.delete(id);
+        if (authors.size === before) continue;
+        if (!authors.size) dropped.delete(channelId);
+        if (canFetch) pendingReload.add(channelId);
     }
 
+    const shown = held.filter(a => !isHiddenAuthor(a.message.author));
+    for (const a of shown) held.splice(held.indexOf(a), 1);
+
+    if (canFetch) {
+        reloadIfPending(SelectedChannelStore.getChannelId());
+        return;
+    }
     // Fallback: put the held messages back, oldest first (IDs are time-ordered).
-    replay.sort((a, b) => (BigInt(a.message.id) < BigInt(b.message.id) ? -1 : 1));
-    for (const action of replay) {
+    shown.sort((a, b) => (BigInt(a.message.id) < BigInt(b.message.id) ? -1 : 1));
+    for (const action of shown) {
         try { FluxDispatcher.dispatch(action); } catch { }
     }
+}
+
+function reloadIfPending(channelId: string) {
+    if (!pendingReload.delete(channelId)) return;
+    try { (MessageActions as any).fetchMessages({ channelId, limit: 50 }); } catch { }
 }
 
 async function poll() {
@@ -280,12 +303,15 @@ async function poll() {
 
     const res = await Native.readState(lastMtime).catch(() => null);
     if (!res) return;
-    lastMtime = res.mtime;
-    let next: State = { enabled: true, users: [] };
+    let next: State;
     try {
-        const parsed = JSON.parse(res.text || "{}");
-        next = { enabled: parsed.enabled !== false, users: Array.isArray(parsed.users) ? parsed.users : [] };
-    } catch { return; }
+        const parsed = JSON.parse(res.text);
+        next = {
+            enabled: parsed.enabled !== false,
+            users: Array.isArray(parsed.users) ? parsed.users.filter((u: any) => typeof u?.value === "string") : []
+        };
+    } catch { return; } // half-written: keep the current list, retry next poll
+    lastMtime = res.mtime;
     const prev = active;
     state = next;
     applyState(prev);
@@ -294,6 +320,7 @@ async function poll() {
 function onKey(e: KeyboardEvent) {
     if (!(e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "h")) return;
     e.preventDefault();
+    if (e.repeat) return;
     const prev = active;
     state.enabled = !state.enabled;
     applyState(prev);
