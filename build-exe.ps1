@@ -7,7 +7,8 @@ $vencord = Join-Path $env:USERPROFILE "Vencord"
 $vencordCommit = "b0e636df2ed5c9006b80ddc6644bc41110404bc3" # pinned so every build uses the same, tested code
 if (-not (Test-Path $vencord)) {
     git init -q $vencord
-    git -C $vencord fetch -q --depth 1 https://github.com/Vendicated/Vencord.git $vencordCommit
+    git -C $vencord remote add origin https://github.com/Vendicated/Vencord.git # Vencord's build reads this
+    git -C $vencord fetch -q --depth 1 origin $vencordCommit
     git -C $vencord checkout -q FETCH_HEAD
     if ($LASTEXITCODE -ne 0) { throw "Could not download Vencord" }
 }
