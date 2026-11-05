@@ -51,7 +51,7 @@ One switch to hide, one switch to show. No restart, nothing to install.
 |:---:|---|
 | **1** | [**Download DiscordNameHider.exe**](https://github.com/rakawe86/discord-name-hider/releases/latest/download/DiscordNameHider.exe) |
 | **2** | Double-click it → **Install into Discord** *(one time, Discord restarts once)* |
-| **3** | Add people by **username** or **User ID** → ticked people disappear |
+| **3** | Add people by **username** or **User ID** → people with their switch on disappear |
 
 > [!TIP]
 > **User IDs are the most reliable** (names can change).
