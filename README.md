@@ -26,7 +26,7 @@ One switch to hide, one switch to show. No restart, nothing to install.
 
 - 🙈 **Hide people completely**: friends list, DMs, chat, member lists
 - 🔘 **Hide everyone toggle**: one switch hides or shows your whole list
-- ☑️ **Per-person checkboxes**: tick = hidden, untick = visible
+- ☑️ **A switch for each person**: on = hidden, off = visible
 - ⚡ **Instant**: changes apply live, no Discord restart
 - ⌨️ **`Ctrl + Shift + H`** inside Discord toggles hiding
 - 📵 **Calls hidden too**: no ringing or call pop-up from hidden people
