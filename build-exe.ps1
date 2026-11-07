@@ -10,7 +10,7 @@ if (-not (Test-Path $vencord)) {
     git init -q $vencord
     git -C $vencord remote add origin https://github.com/Vendicated/Vencord.git # Vencord's build reads this
 }
-if ((git -C $vencord rev-parse HEAD 2>$null) -ne $vencordCommit) {
+if ((git -C $vencord rev-parse -q --verify HEAD) -ne $vencordCommit) { # -q: no error on an empty checkout
     git -C $vencord fetch -q --depth 1 origin $vencordCommit
     git -C $vencord checkout -q FETCH_HEAD
     if ($LASTEXITCODE -ne 0) { throw "Could not download Vencord $vencordCommit" }
