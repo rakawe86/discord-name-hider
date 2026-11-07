@@ -77,9 +77,11 @@ No. It re-applies itself automatically after Discord updates.
 <details>
 <summary><b>How do I update?</b></summary>
 <br>
-When a new version is out, Discord shows a bar saying so with a <b>Download</b> button, and the app shows a <b>Get vX</b> button.
-Download the new .exe, open it and click <b>Update</b>. Your list is kept.
-The check only contacts GitHub (never Discord), at most every few hours.
+You choose in the app with <b>Install updates automatically</b>:<br>
+<b>Off</b> (default): when a new version is out, Discord shows a bar with an <b>Update</b> button. One click and Discord restarts with it.<br>
+<b>On</b>: updates install quietly and are used from the next time Discord starts. Discord is never closed on you.<br>
+The app also shows an <b>Update to vX</b> button. Your list is always kept. Updates are only downloaded from this GitHub page,
+and the check only contacts GitHub (never Discord), at most every few hours.
 </details>
 
 <details>

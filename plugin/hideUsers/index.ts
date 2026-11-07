@@ -18,7 +18,7 @@ const Native = VencordNative.pluginHelpers.HideUsers as PluginNative<typeof impo
 const PrivateChannelSortStore = findStoreLazy("PrivateChannelSortStore");
 
 interface Entry { value: string; label?: string; hidden: boolean; }
-interface State { enabled: boolean; users: Entry[]; }
+interface State { enabled: boolean; users: Entry[]; autoUpdate?: boolean; }
 
 let state: State = { enabled: true, users: [] };
 let lastMtime = 0;
@@ -308,6 +308,7 @@ async function poll() {
     try {
         const parsed = JSON.parse(res.text);
         next = {
+            ...parsed, // keep settings this plugin doesn't use (autoUpdate), so Ctrl+Shift+H doesn't erase them
             enabled: parsed.enabled !== false,
             users: Array.isArray(parsed.users) ? parsed.users.filter((u: any) => typeof u?.value === "string") : []
         };
@@ -335,9 +336,18 @@ let announced = "";
 
 async function checkForUpdate() {
     const version = await Native.checkUpdate().catch(() => null);
-    if (version && version !== announced) {
+    // With "Update automatically" on, Discord's main process installs it quietly instead.
+    if (version && version !== announced && !state.autoUpdate) {
         announced = version;
-        showNotice(`Discord Name Hider v${version} is available.`, "Download", () => { popNotice(); Native.openDownload(); });
+        showNotice(`Discord Name Hider v${version} is available.`, "Update", async () => {
+            popNotice();
+            showToast({ text: "Updating Discord Name Hider... Discord will restart." });
+            if (await Native.installUpdate(version).catch(() => false)) Native.restartDiscord();
+            else {
+                showToast({ text: "Update failed. Opening the download page.", variant: "critical" });
+                Native.openDownload();
+            }
+        });
     }
     updateTimer = setTimeout(checkForUpdate, 6 * 60 * 60 * 1000);
 }

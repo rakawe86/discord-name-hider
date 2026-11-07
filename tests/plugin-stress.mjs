@@ -39,11 +39,12 @@ const stubs = {
     "@utils/types": "export default p => p;",
     "@webpack": "export const findStoreLazy = () => globalThis.__fake.sortStore;",
     "@webpack/common": Object.keys(globalThis.__fake).filter(k => k !== "sortStore").map(k => `export const ${k} = globalThis.__fake.${k};`).join(""),
-    electron: `export const app = { getPath: () => ${JSON.stringify(box)} }; export const shell = { openExternal: u => globalThis.__opened = u };`,
+    electron: `export const app = { getPath: () => ${JSON.stringify(box)}, relaunch() { globalThis.__relaunched = true; }, exit() {} }; export const shell = { openExternal: u => globalThis.__opened = u }; export const app_ = 0;`,
+    child_process: "export const execFile = (f, a, o, cb) => { globalThis.__ran = { f, a }; cb(globalThis.__runError ?? null); };",
     "@api/Notices": "export const showNotice = (m, b, f) => globalThis.__notices.push({ m, f }); export const popNotice = () => {};"
 };
 const plugin = { name: "stubs", setup(b) {
-    b.onResolve({ filter: /^(@utils\/types|@webpack|@webpack\/common|@api\/Notices|electron)$/ }, a => ({ path: a.path, namespace: "stub" }));
+    b.onResolve({ filter: /^(@utils\/types|@webpack|@webpack\/common|@api\/Notices|electron|child_process)$/ }, a => ({ path: a.path, namespace: "stub" }));
     b.onLoad({ filter: /.*/, namespace: "stub" }, a => ({ contents: stubs[a.path], loader: "js" }));
 } };
 async function load(file, name) {
@@ -149,7 +150,8 @@ check("stop() restores everything", now.length === 2 && interceptors.length === 
 process.env.LOCALAPPDATA = box;
 const verFile = join(box, "DiscordNameHider", "dist", "version.txt");
 (await import("fs")).mkdirSync(join(box, "DiscordNameHider", "dist"), { recursive: true });
-const answer = (status, body) => { globalThis.fetch = async u => { globalThis.__asked = u; return { ok: status === 200, json: async () => body }; }; };
+const answer = (status, body, bytes) => { globalThis.fetch = async u => { globalThis.__asked = u; return { ok: status === 200, json: async () => body, arrayBuffer: async () => bytes }; }; };
+const fakeExe = (() => { const b = new Uint8Array(200_000); b[0] = 0x4d; b[1] = 0x5a; return b.buffer; })();
 writeFileSync(verFile, "1.4.1");
 answer(200, { tag_name: "v1.4.2" });
 check("newer release on GitHub is found", await native.checkUpdate() === "1.4.2" && globalThis.__asked.startsWith("https://api.github.com/repos/rakawe86/discord-name-hider/"));
@@ -162,6 +164,29 @@ answer(403, {}); check("GitHub rate limit or error: no prompt, no crash", await 
 globalThis.fetch = async () => { throw new Error("offline"); }; check("offline: no crash", await native.checkUpdate() === null);
 rmSync(verFile); answer(200, { tag_name: "v9.9.9" }); check("version file missing: no prompt", await native.checkUpdate() === null);
 native.openDownload(); check("Download opens the project's release page only", globalThis.__opened === "https://github.com/rakawe86/discord-name-hider/releases/latest");
+
+// One-click / automatic update
+globalThis.__ran = null;
+check("update: bad version text refused before any download", await native.installUpdate(null, "../../evil") === false && globalThis.__ran === null);
+answer(404, null); check("update: missing release file fails cleanly", await native.installUpdate(null, "1.5.0") === false);
+answer(200, null, new Uint8Array(200_000).buffer); check("update: a download that isn't a program is never run", await native.installUpdate(null, "1.5.0") === false && globalThis.__ran === null);
+answer(200, null, fakeExe);
+const ok = await native.installUpdate(null, "1.5.0");
+check("update: downloads from this project's GitHub only", globalThis.__asked === "https://github.com/rakawe86/discord-name-hider/releases/download/v1.5.0/DiscordNameHider.exe");
+check("update: runs the new version to refresh files, Discord keeps running", ok === true && globalThis.__ran.a.join() === "--update-files" && globalThis.__ran.f.endsWith("DiscordNameHider-v1.5.0.exe"));
+globalThis.__runError = new Error("exit 1"); check("update: failure inside the new version is reported", await native.installUpdate(null, "1.5.0") === false); globalThis.__runError = null;
+writeFileSync(verFile, "1.4.1");
+let releaseThenExe = u => u.includes("api.github.com") ? { ok: true, json: async () => ({ tag_name: "v1.5.0" }) } : { ok: true, arrayBuffer: async () => fakeExe };
+globalThis.fetch = async u => releaseThenExe(u);
+native.writeState(null, JSON.stringify({ enabled: true, users: [], autoUpdate: false })); globalThis.__ran = null;
+check("auto mode off: nothing installs by itself", await native.runAutoUpdate() === false && globalThis.__ran === null);
+native.writeState(null, JSON.stringify({ enabled: true, users: [], autoUpdate: true }));
+check("auto mode on: newer version installs by itself", await native.runAutoUpdate() === true && globalThis.__ran?.a.join() === "--update-files");
+native.writeState(null, JSON.stringify({ enabled: true, users: [person(HIDDEN)], autoUpdate: true })); await tick();
+VencordNative.pluginHelpers.HideUsers.writeState = async t => native.writeState(null, t);
+globalThis.__key({ ctrlKey: true, shiftKey: true, key: "H", preventDefault() { } });
+check("Ctrl+Shift+H keeps the auto-update setting", JSON.parse(readFileSync(stateFile, "utf8")).autoUpdate === true);
+native.restartDiscord(); check("Update button restarts Discord after installing", globalThis.__relaunched === true);
 
 // Native write must be atomic: no moment where a reader sees a partial file.
 const src = readFileSync(join(pluginDir, "native.ts"), "utf8");

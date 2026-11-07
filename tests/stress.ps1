@@ -132,6 +132,11 @@ if ($esc.Count) { throw "sandbox escape: $esc" }
 [IO.File]::WriteAllText($vs, '{"themeLinks":["keep-me"],"plugins":{"Other":{"enabled":true}}}')
 $inst = $hider.GetMethod("Install", $all); $uninst = $hider.GetMethod("Uninstall", $all); $isInst = $hider.GetMethod("IsInstalled", $all)
 [void]$inst.Invoke($null, $null); [void]$inst.Invoke($null, $null)
+$upd = $hider.GetMethod("UpdateFiles", $all); [IO.File]::WriteAllText("$local\DiscordNameHider\dist\version.txt", "0.0.1")
+[void]$upd.Invoke($null, $null)
+Check "background update refreshes the installed files" ((Get-Content "$local\DiscordNameHider\dist\version.txt") -eq $hider.GetField("Version", $all).GetValue($null))
+$dl = $hider.GetMethod("DownloadRelease", $all); $refused = $false; try { [void]$dl.Invoke($null, @("..\..\x")) } catch { $refused = $true }
+Check "download refuses a bad version text" $refused
 Check "install records the version for the update check" ((Get-Content "$local\DiscordNameHider\dist\version.txt") -eq $hider.GetField("Version", $all).GetValue($null))
 Check "install twice keeps the original Discord file" ([IO.File]::ReadAllText("$res\_app.asar") -eq "ORIGINAL-1.0.1" -and $isInst.Invoke($null, $null))
 $s = [IO.File]::ReadAllText($vs); Check "install keeps other settings" ($s -match "keep-me" -and $s -match "Other" -and $s -match "NoTrack")
@@ -142,6 +147,8 @@ Check "re-install patches the new version" ($isInst.Invoke($null, $null) -and (T
 [void]$uninst.Invoke($null, $null)
 Check "uninstall restores every version exactly" ([IO.File]::ReadAllText("$res\app.asar") -eq "ORIGINAL-1.0.1" -and [IO.File]::ReadAllText("$res2\app.asar") -eq "ORIGINAL-1.0.2" -and -not (Test-Path "$res\_app.asar"))
 Check "uninstall keeps the list" (Test-Path $tmp)
+$threw = $false; try { [void]$upd.Invoke($null, $null) } catch { $threw = $true }
+Check "background update never touches a Discord without the tool" $threw
 [IO.File]::WriteAllText($vs, "{corrupt"); [void]$inst.Invoke($null, $null); [void]$uninst.Invoke($null, $null)
 Check "corrupt Vencord settings are backed up, not lost" ((Test-Path "$vs.bad") -and [IO.File]::ReadAllText("$vs.bad") -eq "{corrupt")
 

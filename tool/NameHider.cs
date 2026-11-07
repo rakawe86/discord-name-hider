@@ -29,9 +29,26 @@ static class Program
     [DllImport("user32.dll")]
     static extern bool SetProcessDPIAware();
 
+    public static string StartupMessage = "";
+
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
+        try { File.Delete(Application.ExecutablePath + ".old"); } catch { } // left by a self-update
+
+        // Sent by the plugin inside Discord: refresh the installed files, no window, Discord keeps running.
+        if (args.Contains("--update-files"))
+        {
+            try { Hider.UpdateFiles(); Environment.Exit(0); }
+            catch { Environment.Exit(1); }
+        }
+        // Sent by an older copy of this app after downloading this one.
+        if (args.Contains("--install"))
+        {
+            try { Hider.Install(); StartupMessage = "Updated to v" + Hider.Version + ". Discord is restarting."; }
+            catch (Exception ex) { StartupMessage = "Error: " + ex.Message; }
+        }
+
         SetProcessDPIAware(); // sharp text instead of a blurry stretched window
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -49,12 +66,13 @@ class Person
 class HiderState
 {
     public bool enabled = true;
+    public bool autoUpdate;
     public List<Person> users = new List<Person>();
 }
 
 static class Hider
 {
-    public const string Version = "1.4.1"; // bump for every release; the GitHub tag must be "v" + this
+    public const string Version = "1.5.0"; // bump for every release; the GitHub tag must be "v" + this
     const string Repo = "rakawe86/discord-name-hider";
     public const string DownloadPage = "https://github.com/" + Repo + "/releases/latest";
 
@@ -80,6 +98,38 @@ static class Hider
             }
         }
         catch { return null; }
+    }
+
+    public static string InstalledVersion()
+    {
+        try { return File.ReadAllText(Path.Combine(DistDir, "version.txt")).Trim(); } catch { return ""; }
+    }
+
+    // Downloads a release exe from this project's GitHub. Throws on anything that isn't a Windows program.
+    public static string DownloadRelease(string version)
+    {
+        if (!Regex.IsMatch(version, @"^\d+(\.\d+)*$")) throw new ArgumentException("Bad version: " + version);
+        var dir = Path.Combine(Path.GetDirectoryName(DistDir), "updates");
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, "DiscordNameHider-v" + version + ".exe");
+        ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+        using (var web = new WebClient())
+        {
+            web.Headers[HttpRequestHeader.UserAgent] = "DiscordNameHider";
+            var bytes = web.DownloadData("https://github.com/" + Repo + "/releases/download/v" + version + "/DiscordNameHider.exe");
+            if (bytes.Length < 100000 || bytes[0] != 'M' || bytes[1] != 'Z') throw new Exception("The download was not a valid app.");
+            File.WriteAllBytes(file + ".tmp", bytes);
+        }
+        if (File.Exists(file)) File.Delete(file);
+        File.Move(file + ".tmp", file);
+        return file;
+    }
+
+    // Refresh the files Discord loads, without closing Discord; they're used from its next start.
+    public static void UpdateFiles()
+    {
+        if (!IsInstalled()) throw new InvalidOperationException("Not installed in Discord.");
+        ExtractDist();
     }
 
     static readonly string LocalApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -759,7 +809,7 @@ class MainForm : Form
     DateTime lastWrite;
     bool needsUpdate, recheck = true, confirmUninstall;
 
-    readonly ToggleSwitch master;
+    readonly ToggleSwitch master, autoSwitch;
     readonly Card masterCard;
     readonly Label masterText, masterSub, installBadge, footer, countLabel;
     readonly PeopleList people;
@@ -780,7 +830,7 @@ class MainForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         DoubleBuffered = true;
         Text = "Discord Name Hider";
-        ClientSize = new Size(500, 704);
+        ClientSize = new Size(500, 740);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -795,13 +845,15 @@ class MainForm : Form
         Controls.Add(new Label { Text = "Discord Name Hider", Font = Theme.F(16f, true), AutoSize = true, Location = new Point(82, 20), BackColor = Theme.Bg });
         installBadge = new Label { AutoSize = true, Location = new Point(84, 52), Font = Theme.F(9f), BackColor = Theme.Bg };
         Controls.Add(installBadge);
-        var updateLink = new ModernButton { Location = new Point(332, 28), Size = new Size(144, 34), Visible = false, Font = Theme.F(9f, true) };
-        updateLink.Click += (s, e) => Process.Start(Hider.DownloadPage);
+        var updateLink = new ModernButton { Location = new Point(316, 28), Size = new Size(160, 34), Visible = false, Font = Theme.F(9f, true) };
+        string latest = null;
+        updateLink.Click += (s, e) => SelfUpdate(updateLink, latest);
         Controls.Add(updateLink);
         Task.Factory.StartNew(() => Hider.LatestRelease()).ContinueWith(t =>
         {
             if (t.Result == null || IsDisposed) return;
-            updateLink.Text = "Get v" + t.Result;
+            latest = t.Result;
+            updateLink.Text = "Update to v" + latest;
             updateLink.Visible = true;
         }, TaskScheduler.FromCurrentSynchronizationContext());
 
@@ -844,14 +896,21 @@ class MainForm : Form
         Controls.Add(new Label
         {
             Text = "User IDs work best: Discord > Settings > Advanced > Developer Mode, then right-click a person > Copy User ID.  Ctrl+Shift+H in Discord switches hiding on or off.",
-            ForeColor = Theme.Muted, Font = Theme.F(8.5f), Location = new Point(26, 560), Size = new Size(450, 52), BackColor = Theme.Bg
+            ForeColor = Theme.Muted, Font = Theme.F(8.5f), Location = new Point(26, 602), Size = new Size(450, 52), BackColor = Theme.Bg
         });
 
+        // Updates: off = Discord shows an "Update" button; on = installed quietly, used from the next Discord start.
+        Controls.Add(new Label { Text = "Install updates automatically", Font = Theme.F(10f, true), AutoSize = true, Location = new Point(26, 562), BackColor = Theme.Bg });
+        Controls.Add(new Label { Text = "Off: Discord shows an Update button when a new version is out", ForeColor = Theme.Muted, Font = Theme.F(8.5f), AutoSize = true, Location = new Point(26, 582), BackColor = Theme.Bg });
+        autoSwitch = new ToggleSwitch { Location = new Point(428, 564), Size = new Size(48, 26), BackColor = Theme.Bg, AccessibleName = "Install updates automatically" };
+        autoSwitch.Toggled += (s, e) => { state.autoUpdate = autoSwitch.On; Save(); };
+        Controls.Add(autoSwitch);
+
         // Footer
-        installBtn = new ModernButton { Location = new Point(24, 628), Size = new Size(190, 44) };
+        installBtn = new ModernButton { Location = new Point(24, 664), Size = new Size(190, 44) };
         installBtn.Click += (s, e) => InstallOrUninstall();
         installBtn.MouseLeave += (s, e) => { if (confirmUninstall) { confirmUninstall = false; RefreshStatus(); } };
-        footer = new Label { ForeColor = Theme.Muted, Location = new Point(226, 628), Size = new Size(250, 44), TextAlign = ContentAlignment.MiddleLeft, Font = Theme.F(9f), BackColor = Theme.Bg };
+        footer = new Label { Text = Program.StartupMessage, ForeColor = Program.StartupMessage.StartsWith("Error") ? Theme.Red : Theme.Green, Location = new Point(226, 664), Size = new Size(250, 44), TextAlign = ContentAlignment.MiddleLeft, Font = Theme.F(9f), BackColor = Theme.Bg };
         Controls.AddRange(new Control[] { installBtn, footer });
         ResumeLayout(false);
         ActiveControl = addValue;
@@ -937,6 +996,7 @@ class MainForm : Form
     void RefreshStatus()
     {
         master.On = state.enabled;
+        autoSwitch.On = state.autoUpdate;
         masterCard.BorderColor = state.enabled ? Theme.Green : Theme.Border;
         masterCard.Invalidate();
         masterText.ForeColor = state.enabled ? Theme.Text : Theme.Muted;
@@ -948,10 +1008,11 @@ class MainForm : Form
 
         bool installed = Hider.IsInstalled();
         bool hasDiscord = Hider.InstalledDiscords().Count > 0;
-        if (recheck) { needsUpdate = installed && Hider.NeedsUpdate(); recheck = false; }
+        // Never offer to "update" Discord to an older version than the one already installed.
+        if (recheck) { needsUpdate = installed && Hider.NeedsUpdate() && !Hider.IsNewer(Hider.InstalledVersion(), Hider.Version); recheck = false; }
         installBadge.Text = !hasDiscord ? "●  Discord app not found"
             : needsUpdate ? "●  New version ready: click Update"
-            : installed ? "●  Active in Discord" : "●  Not installed in Discord yet";
+            : installed ? "●  Active in Discord  ·  v" + Hider.InstalledVersion() : "●  Not installed in Discord yet";
         installBadge.ForeColor = !hasDiscord ? Theme.Red : installed && !needsUpdate ? Theme.Green : Theme.Amber;
 
         bool primary = !installed || needsUpdate;
@@ -1009,6 +1070,41 @@ class MainForm : Form
     {
         foreach (var p in state.users) p.hidden = hidden;
         Save();
+    }
+
+    // Download the new release, swap it in for this exe, and let it install itself.
+    void SelfUpdate(ModernButton button, string version)
+    {
+        if (version == null) return;
+        button.Enabled = false;
+        button.Text = "Downloading...";
+        Task.Factory.StartNew(() =>
+        {
+            var file = Hider.DownloadRelease(version);
+            try
+            {
+                // Replace this exe so an old copy can't be opened by mistake later.
+                var me = Application.ExecutablePath;
+                if (File.Exists(me + ".old")) File.Delete(me + ".old");
+                File.Move(me, me + ".old");
+                File.Copy(file, me);
+                file = me;
+            }
+            catch { } // read-only folder: run it from the updates folder instead
+            return file;
+        }).ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                footer.ForeColor = Theme.Red;
+                footer.Text = "Update failed: " + t.Exception.GetBaseException().Message;
+                button.Enabled = true;
+                button.Text = "Update to v" + version;
+                return;
+            }
+            Process.Start(t.Result, "--install");
+            Close();
+        }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     void InstallOrUninstall()

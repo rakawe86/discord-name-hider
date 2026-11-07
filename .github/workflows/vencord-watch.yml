@@ -1,0 +1,72 @@
+name: Vencord watch
+
+# Every day: if Vencord released a new version (usually after a Discord update broke things),
+# build with it, run every test, and only if all pass publish a new release.
+# Users then get the update (automatically, or via the Update button, as they chose).
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Look for a new Vencord version
+        id: check
+        run: |
+          $tags = git ls-remote --tags https://github.com/Vendicated/Vencord.git | ForEach-Object {
+            if ($_ -match '^(\w+)\s+refs/tags/v(\d+\.\d+\.\d+)(\^\{\})?$') { [pscustomobject]@{ Sha = $matches[1]; Ver = [version]$matches[2]; Peeled = [bool]$matches[3] } }
+          }
+          $latest = $tags | Sort-Object Ver, Peeled -Descending | Select-Object -First 1
+          $script = Get-Content build-exe.ps1 -Raw
+          $pinned = [regex]::Match($script, '\$vencordCommit = "(\w+)"').Groups[1].Value
+          if ($latest.Sha -eq $pinned) { "Vencord v$($latest.Ver) is already used."; "new=false" >> $env:GITHUB_OUTPUT; exit 0 }
+
+          $script = $script -replace '\$vencordCommit = "\w+"', "`$vencordCommit = `"$($latest.Sha)`""
+          $script = $script -replace '\(v\d+\.\d+\.\d+\)\.', "(v$($latest.Ver))."
+          [IO.File]::WriteAllText("build-exe.ps1", $script)
+
+          $cs = Get-Content tool\NameHider.cs -Raw
+          $old = [version][regex]::Match($cs, 'Version = "([\d.]+)"').Groups[1].Value
+          $new = "$($old.Major).$($old.Minor).$($old.Build + 1)"
+          [IO.File]::WriteAllText("tool\NameHider.cs", ($cs -replace 'Version = "[\d.]+"', "Version = `"$new`""))
+          "Updating to Vencord v$($latest.Ver) as v$new"
+          "new=true" >> $env:GITHUB_OUTPUT
+          "version=$new" >> $env:GITHUB_OUTPUT
+          "vencord=$($latest.Ver)" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        if: steps.check.outputs.new == 'true'
+        run: .\build-exe.ps1
+      - name: Test the plugin
+        if: steps.check.outputs.new == 'true'
+        run: node tests/plugin-stress.mjs
+      - name: Test the app
+        if: steps.check.outputs.new == 'true'
+        run: powershell -STA -ExecutionPolicy Bypass -File tests\stress.ps1
+
+      - name: Publish (only reached when every test passed)
+        if: steps.check.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.check.outputs.version }}
+          VENCORD: ${{ steps.check.outputs.vencord }}
+        run: |
+          git config user.name "rakawe86"
+          git config user.email "rakawe86@users.noreply.github.com"
+          git add build-exe.ps1 tool/NameHider.cs DiscordNameHider.exe
+          git commit -m "v$env:VERSION: update Vencord to v$env:VENCORD"
+          git push
+          gh release create "v$env:VERSION" DiscordNameHider.exe --title "Discord Name Hider v$env:VERSION" --latest --notes "Updates the bundled Vencord to v$env:VENCORD so the tool keeps working with the latest Discord. Built and tested automatically.`n`nYou'll get it automatically, or through the Update button in Discord."
