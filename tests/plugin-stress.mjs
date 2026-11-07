@@ -16,6 +16,7 @@ const stateFile = join(box, "DiscordNameHider", "state.json");
 const ME = "100000000000000001", HIDDEN = "200000000000000002", OTHER = "300000000000000003";
 const users = { [ME]: { username: "me" }, [HIDDEN]: { username: "hiddenguy" }, [OTHER]: { username: "other" } };
 const channels = { dm1: { type: 1, recipients: [HIDDEN] }, dm2: { type: 1, recipients: [OTHER] }, group: { type: 3, recipients: [HIDDEN, OTHER] }, srv: { type: 0 } };
+globalThis.__notices = [];
 let interceptors, fetches, breakUsers = false, selected = "srv", voice = {};
 const plainStore = extra => ({ emitChange() { }, ...extra });
 globalThis.__fake = {
@@ -38,10 +39,11 @@ const stubs = {
     "@utils/types": "export default p => p;",
     "@webpack": "export const findStoreLazy = () => globalThis.__fake.sortStore;",
     "@webpack/common": Object.keys(globalThis.__fake).filter(k => k !== "sortStore").map(k => `export const ${k} = globalThis.__fake.${k};`).join(""),
-    electron: `export const app = { getPath: () => ${JSON.stringify(box)} };`
+    electron: `export const app = { getPath: () => ${JSON.stringify(box)} }; export const shell = { openExternal: u => globalThis.__opened = u };`,
+    "@api/Notices": "export const showNotice = (m, b, f) => globalThis.__notices.push({ m, f }); export const popNotice = () => {};"
 };
 const plugin = { name: "stubs", setup(b) {
-    b.onResolve({ filter: /^(@utils\/types|@webpack|@webpack\/common|electron)$/ }, a => ({ path: a.path, namespace: "stub" }));
+    b.onResolve({ filter: /^(@utils\/types|@webpack|@webpack\/common|@api\/Notices|electron)$/ }, a => ({ path: a.path, namespace: "stub" }));
     b.onLoad({ filter: /.*/, namespace: "stub" }, a => ({ contents: stubs[a.path], loader: "js" }));
 } };
 async function load(file, name) {
@@ -142,6 +144,24 @@ VencordNative.pluginHelpers.HideUsers.writeState = realWrite;
 hide.stop();
 const now = globalThis.__fake.RelationshipStore.getFriendIDs();
 check("stop() restores everything", now.length === 2 && interceptors.length === 0);
+
+// Update check (GitHub only)
+process.env.LOCALAPPDATA = box;
+const verFile = join(box, "DiscordNameHider", "dist", "version.txt");
+(await import("fs")).mkdirSync(join(box, "DiscordNameHider", "dist"), { recursive: true });
+const answer = (status, body) => { globalThis.fetch = async u => { globalThis.__asked = u; return { ok: status === 200, json: async () => body }; }; };
+writeFileSync(verFile, "1.4.1");
+answer(200, { tag_name: "v1.4.2" });
+check("newer release on GitHub is found", await native.checkUpdate() === "1.4.2" && globalThis.__asked.startsWith("https://api.github.com/repos/rakawe86/discord-name-hider/"));
+answer(200, { tag_name: "v1.4.1" }); check("same version: no prompt", await native.checkUpdate() === null);
+answer(200, { tag_name: "v1.3.9" }); check("older release: no prompt", await native.checkUpdate() === null);
+answer(200, { tag_name: "v1.10.0" }); check("1.10 counts as newer than 1.4 (not text order)", await native.checkUpdate() === "1.10.0");
+answer(200, { tag_name: "<script>" }); check("junk tag ignored", await native.checkUpdate() === null);
+answer(200, null); check("empty reply ignored", await native.checkUpdate() === null);
+answer(403, {}); check("GitHub rate limit or error: no prompt, no crash", await native.checkUpdate() === null);
+globalThis.fetch = async () => { throw new Error("offline"); }; check("offline: no crash", await native.checkUpdate() === null);
+rmSync(verFile); answer(200, { tag_name: "v9.9.9" }); check("version file missing: no prompt", await native.checkUpdate() === null);
+native.openDownload(); check("Download opens the project's release page only", globalThis.__opened === "https://github.com/rakawe86/discord-name-hider/releases/latest");
 
 // Native write must be atomic: no moment where a reader sees a partial file.
 const src = readFileSync(join(pluginDir, "native.ts"), "utf8");

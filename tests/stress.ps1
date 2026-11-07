@@ -120,6 +120,10 @@ Check "file held almost nonstop: a save may be refused, the file is never lost" 
 $x = SaveWhileHeld 20 300
 Check "300 saves while the file is read repeatedly: none fail, file never lost" ($x.Bad -eq 0 -and $x.Lost -eq 0) "$($x.Bad) failed, missing $($x.Lost) times: $($x.Why)"
 
+# --- update check ---
+$newer = $hider.GetMethod("IsNewer", $all)
+Check "version compare: newer, same, older, 1.10 vs 1.4, junk" ($newer.Invoke($null, @("1.4.2", "1.4.1")) -and -not $newer.Invoke($null, @("1.4.1", "1.4.1")) -and -not $newer.Invoke($null, @("1.3.9", "1.4.1")) -and $newer.Invoke($null, @("1.10.0", "1.4.1")) -and -not $newer.Invoke($null, @("<x>", "1.4.1")))
+
 # --- install / uninstall on a fake Discord ---
 function FakeDiscord($ver) { $res = "$local\FakeDiscord0\app-$ver\resources"; New-Item -ItemType Directory -Force $res | Out-Null; [IO.File]::WriteAllText("$res\app.asar", "ORIGINAL-$ver"); $res }
 $res = FakeDiscord "1.0.1"
@@ -128,6 +132,7 @@ if ($esc.Count) { throw "sandbox escape: $esc" }
 [IO.File]::WriteAllText($vs, '{"themeLinks":["keep-me"],"plugins":{"Other":{"enabled":true}}}')
 $inst = $hider.GetMethod("Install", $all); $uninst = $hider.GetMethod("Uninstall", $all); $isInst = $hider.GetMethod("IsInstalled", $all)
 [void]$inst.Invoke($null, $null); [void]$inst.Invoke($null, $null)
+Check "install records the version for the update check" ((Get-Content "$local\DiscordNameHider\dist\version.txt") -eq $hider.GetField("Version", $all).GetValue($null))
 Check "install twice keeps the original Discord file" ([IO.File]::ReadAllText("$res\_app.asar") -eq "ORIGINAL-1.0.1" -and $isInst.Invoke($null, $null))
 $s = [IO.File]::ReadAllText($vs); Check "install keeps other settings" ($s -match "keep-me" -and $s -match "Other" -and $s -match "NoTrack")
 $res2 = FakeDiscord "1.0.2"

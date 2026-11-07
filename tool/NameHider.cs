@@ -14,13 +14,15 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Net;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Discord Name Hider")]
 [assembly: AssemblyProduct("Discord Name Hider")]
-[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyVersion(Hider.Version + ".0")]
 
 static class Program
 {
@@ -52,6 +54,34 @@ class HiderState
 
 static class Hider
 {
+    public const string Version = "1.4.1"; // bump for every release; the GitHub tag must be "v" + this
+    const string Repo = "rakawe86/discord-name-hider";
+    public const string DownloadPage = "https://github.com/" + Repo + "/releases/latest";
+
+    public static bool IsNewer(string a, string b)
+    {
+        Version x, y;
+        return System.Version.TryParse(a, out x) && System.Version.TryParse(b, out y) && x > y;
+    }
+
+    // The newer version on GitHub, or null (offline, GitHub down, nothing new).
+    public static string LatestRelease()
+    {
+        try
+        {
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+            using (var web = new WebClient())
+            {
+                web.Headers[HttpRequestHeader.UserAgent] = "DiscordNameHider";
+                var release = Json().DeserializeObject(web.DownloadString("https://api.github.com/repos/" + Repo + "/releases/latest")) as Dictionary<string, object>;
+                object tag;
+                var latest = release != null && release.TryGetValue("tag_name", out tag) ? Convert.ToString(tag).TrimStart('v') : "";
+                return IsNewer(latest, Version) ? latest : null;
+            }
+        }
+        catch { return null; }
+    }
+
     static readonly string LocalApp = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
     static readonly string RoamingApp = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
@@ -141,8 +171,8 @@ static class Hider
     {
         return ResourceDirs(flavor).OrderByDescending(res =>
         {
-            Version v;
-            return Version.TryParse(Path.GetFileName(Path.GetDirectoryName(res)).Substring(4), out v) ? v : new Version();
+            System.Version v;
+            return System.Version.TryParse(Path.GetFileName(Path.GetDirectoryName(res)).Substring(4), out v) ? v : new System.Version();
         }).FirstOrDefault();
     }
 
@@ -210,6 +240,7 @@ static class Hider
             using (var o = File.Create(Path.Combine(DistDir, name)))
                 s.CopyTo(o);
         }
+        File.WriteAllText(Path.Combine(DistDir, "version.txt"), Version); // read by the plugin's update check
     }
 
     // Writes a minimal asar archive whose index.js loads our patcher.
@@ -764,6 +795,15 @@ class MainForm : Form
         Controls.Add(new Label { Text = "Discord Name Hider", Font = Theme.F(16f, true), AutoSize = true, Location = new Point(82, 20), BackColor = Theme.Bg });
         installBadge = new Label { AutoSize = true, Location = new Point(84, 52), Font = Theme.F(9f), BackColor = Theme.Bg };
         Controls.Add(installBadge);
+        var updateLink = new ModernButton { Location = new Point(332, 28), Size = new Size(144, 34), Visible = false, Font = Theme.F(9f, true) };
+        updateLink.Click += (s, e) => Process.Start(Hider.DownloadPage);
+        Controls.Add(updateLink);
+        Task.Factory.StartNew(() => Hider.LatestRelease()).ContinueWith(t =>
+        {
+            if (t.Result == null || IsDisposed) return;
+            updateLink.Text = "Get v" + t.Result;
+            updateLink.Visible = true;
+        }, TaskScheduler.FromCurrentSynchronizationContext());
 
         // Hide everyone
         masterCard = new Card { Location = new Point(24, 88), Size = new Size(452, 78) };

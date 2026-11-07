@@ -9,6 +9,7 @@
  * is live. Ctrl+Shift+H toggles hiding on/off from inside Discord.
  */
 
+import { popNotice, showNotice } from "@api/Notices";
 import definePlugin, { PluginNative } from "@utils/types";
 import { findStoreLazy } from "@webpack";
 import { ChannelStore, FluxDispatcher, MessageActions, MessageStore, RelationshipStore, SelectedChannelStore, showToast, UserStore, VoiceStateStore } from "@webpack/common";
@@ -329,6 +330,17 @@ function onKey(e: KeyboardEvent) {
 }
 
 let timer: ReturnType<typeof setInterval> | undefined;
+let updateTimer: ReturnType<typeof setTimeout> | undefined;
+let announced = "";
+
+async function checkForUpdate() {
+    const version = await Native.checkUpdate().catch(() => null);
+    if (version && version !== announced) {
+        announced = version;
+        showNotice(`Discord Name Hider v${version} is available.`, "Download", () => { popNotice(); Native.openDownload(); });
+    }
+    updateTimer = setTimeout(checkForUpdate, 6 * 60 * 60 * 1000);
+}
 
 export default definePlugin({
     name: "HideUsers",
@@ -344,10 +356,12 @@ export default definePlugin({
         applyState(new Set());
         timer = setInterval(poll, 1000);
         document.addEventListener("keydown", onKey);
+        updateTimer = setTimeout(checkForUpdate, 15000); // after Discord has finished loading
     },
 
     stop() {
         clearInterval(timer);
+        clearTimeout(updateTimer);
         document.removeEventListener("keydown", onKey);
         const list = (FluxDispatcher as any)._interceptors;
         if (Array.isArray(list)) {

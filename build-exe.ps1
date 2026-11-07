@@ -4,13 +4,16 @@ $ErrorActionPreference = "Stop"
 $env:Path += ";C:\Program Files\Git\cmd"
 
 $vencord = Join-Path $env:USERPROFILE "Vencord"
-$vencordCommit = "b0e636df2ed5c9006b80ddc6644bc41110404bc3" # pinned so every build uses the same, tested code
+# Pinned so every build uses the same, tested code. Bump it when Discord updates break Vencord (v1.15.16).
+$vencordCommit = "383409e6a6ec9008ee8a7496500f1e75f17824d1"
 if (-not (Test-Path $vencord)) {
     git init -q $vencord
     git -C $vencord remote add origin https://github.com/Vendicated/Vencord.git # Vencord's build reads this
+}
+if ((git -C $vencord rev-parse HEAD 2>$null) -ne $vencordCommit) {
     git -C $vencord fetch -q --depth 1 origin $vencordCommit
     git -C $vencord checkout -q FETCH_HEAD
-    if ($LASTEXITCODE -ne 0) { throw "Could not download Vencord" }
+    if ($LASTEXITCODE -ne 0) { throw "Could not download Vencord $vencordCommit" }
 }
 
 $dest = Join-Path $vencord "src\userplugins\hideUsers"
@@ -19,9 +22,12 @@ Copy-Item (Join-Path $PSScriptRoot "plugin\hideUsers\*") $dest -Recurse -Force
 
 Push-Location $vencord
 try {
-    if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) { npm install -g pnpm@11.9.0 }
+    # Use exactly the pnpm this Vencord version asks for.
+    # Use exactly the pnpm this Vencord version asks for.
+    $want = ((Get-Content package.json -Raw | ConvertFrom-Json).packageManager -split "@")[1]
+    if (-not (Get-Command pnpm -ErrorAction SilentlyContinue) -or (pnpm --version) -ne $want) { npm install -g "pnpm@$want" }
     pnpm install --frozen-lockfile
-    if ($LASTEXITCODE -ne 0) { throw "pnpm install failed" }
+    if ($LASTEXITCODE -ne 0) { throw "pnpm install failed (antivirus can block pnpm's program; the GitHub build is unaffected)" }
     pnpm build
     if ($LASTEXITCODE -ne 0) { throw "Vencord build failed" }
 } finally { Pop-Location }

@@ -20,8 +20,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install pnpm
-        run: npm install -g pnpm@11.9.0
       - name: Build
         run: .\build-exe.ps1
       - name: Test the plugin
