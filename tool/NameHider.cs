@@ -72,7 +72,7 @@ class HiderState
 
 static class Hider
 {
-    public const string Version = "1.5.0"; // bump for every release; the GitHub tag must be "v" + this
+    public const string Version = "1.5.1"; // bump for every release; the GitHub tag must be "v" + this
     const string Repo = "rakawe86/discord-name-hider";
     public const string DownloadPage = "https://github.com/" + Repo + "/releases/latest";
 
@@ -775,7 +775,7 @@ class PeopleList : Control
         var sw = ToggleRect(i);
         int tx = ax + a + pad + pad / 2, tw = (i == hover ? RemoveRect(i).X : sw.X) - tx - pad;
         var status = p.hidden && !dimmed ? "Hidden" : dimmed && p.hidden ? "Paused" : "Visible";
-        var sub = string.IsNullOrEmpty(p.label) ? status : status + "  ·  " + p.label;
+        var sub = string.IsNullOrEmpty(p.label) ? status : status + "  Â·  " + p.label;
         int lineH = r.Height / 2;
         TextRenderer.DrawText(g, name, nameFont, new Rectangle(tx, r.Y + lineH / 6, tw, lineH), dimmed ? Theme.Muted : Theme.Text,
             TextFormatFlags.Left | TextFormatFlags.Bottom | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
@@ -1010,9 +1010,9 @@ class MainForm : Form
         bool hasDiscord = Hider.InstalledDiscords().Count > 0;
         // Never offer to "update" Discord to an older version than the one already installed.
         if (recheck) { needsUpdate = installed && Hider.NeedsUpdate() && !Hider.IsNewer(Hider.InstalledVersion(), Hider.Version); recheck = false; }
-        installBadge.Text = !hasDiscord ? "●  Discord app not found"
-            : needsUpdate ? "●  New version ready: click Update"
-            : installed ? "●  Active in Discord  ·  v" + Hider.InstalledVersion() : "●  Not installed in Discord yet";
+        installBadge.Text = !hasDiscord ? "â—  Discord app not found"
+            : needsUpdate ? "â—  New version ready: click Update"
+            : installed ? "â—  Active in Discord  Â·  v" + Hider.InstalledVersion() : "â—  Not installed in Discord yet";
         installBadge.ForeColor = !hasDiscord ? Theme.Red : installed && !needsUpdate ? Theme.Green : Theme.Amber;
 
         bool primary = !installed || needsUpdate;
