@@ -4,8 +4,8 @@ $ErrorActionPreference = "Stop"
 $env:Path += ";C:\Program Files\Git\cmd"
 
 $vencord = Join-Path $env:USERPROFILE "Vencord"
-# Pinned so every build uses the same, tested code. Bump it when Discord updates break Vencord (v1.15.17).
-$vencordCommit = "795ed0ff5b7e6b8db7488d0fcc95512a58edc919"
+# Pinned so every build uses the same, tested code. Bump it when Discord updates break Vencord (v1.15.18).
+$vencordCommit = "e75ac9ace41f6212cfaa2d5f3670830be392da4e"
 if (-not (Test-Path $vencord)) {
     git init -q $vencord
     git -C $vencord remote add origin https://github.com/Vendicated/Vencord.git # Vencord's build reads this
